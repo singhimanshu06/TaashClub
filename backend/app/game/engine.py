@@ -76,6 +76,10 @@ class Game:
         self.awaiting_trick_clear = False
         self.last_trick_winner_seat: Optional[int] = None
         self.last_round_result: Optional[list[dict]] = None
+        # Per-round result history accumulated as each round ends. Used by the
+        # end-of-game detailed-scores view. Each entry:
+        # {"round_index", "trump", "cards_this_round", "results": [...]}
+        self.round_history: list[dict] = []
 
     # ----- lookups -------------------------------------------------------
     @property
@@ -217,10 +221,19 @@ class Game:
                     "tricks_won": p.tricks_won,
                     "points": points,
                     "hit": hit,
-                    # cumulative total withheld until game end (scoreboard shown only at the end)
                 }
             )
         self.last_round_result = result
+        # Accumulate a per-round snapshot (with the trump and cards dealt) for
+        # the end-of-game detailed-scores view. `to_state` exposes this list.
+        self.round_history.append(
+            {
+                "round_index": self.round_index,
+                "trump": self.trump.value if self.trump else None,
+                "cards_this_round": self.cards_this_round,
+                "results": result,
+            }
+        )
 
         if self.round_index + 1 >= self.total_rounds:
             self.phase = Phase.GAME_END
@@ -232,6 +245,19 @@ class Game:
         if self.phase != Phase.ROUND_END:
             raise GameError("no round to advance")
         self._start_round()
+
+    def force_end(self) -> None:
+        """End the game immediately (e.g. all humans left).
+
+        Abandons the current round — its points are not scored into totals. The
+        final standings reflect only completed rounds. Clears any in-progress
+        trick so the state is clean for GAME_END serialization.
+        """
+        self.awaiting_trick_clear = False
+        self.current_trick = []
+        self.led_suit = None
+        self.last_trick_winner_seat = None
+        self.phase = Phase.GAME_END
 
     # ----- serialization -------------------------------------------------
     def final_standings(self) -> list[dict]:
@@ -282,7 +308,12 @@ class Game:
                     "hand_count": len(p.hand),
                     "hand": [c.to_dict() for c in p.hand] if p.id == viewer_id else None,
                     "connected": p.connected,
-                    # total_score is intentionally withheld mid-game (revealed at game end)
+                    "is_bot": p.is_bot,
+                    # Cumulative total through all completed rounds. During the
+                    # active round this reflects "up to the previous round"; the
+                    # current round's points are added only when it ends. Used by
+                    # the in-game scorecard toggle.
+                    "total_score": p.total_score,
                 }
                 for p in self.players
             ],
@@ -292,5 +323,6 @@ class Game:
                 else None
             ),
             "last_round_result": self.last_round_result,
+            "round_history": self.round_history,
             "final_standings": self.final_standings() if self.phase == Phase.GAME_END else None,
         }

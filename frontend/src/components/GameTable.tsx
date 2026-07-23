@@ -1,11 +1,12 @@
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { GameState, StatePlayer } from "../types";
-import PlayingCard, { CardBack, suitSymbol, isRed } from "./PlayingCard";
+import PlayingCard, { suitSymbol, isRed } from "./PlayingCard";
 import Hand from "./Hand";
 import BidPanel from "./BidPanel";
 import RoundResult from "./RoundResult";
 import GameOver from "./GameOver";
+import Scorecard from "./Scorecard";
 
 const VARIANT_TRUMP_NAME: Record<string, string> = { S: "Spades", H: "Hearts", C: "Clubs", D: "Diamonds" };
 
@@ -45,22 +46,18 @@ function Seat({
           </span>
         )}
       </div>
-      <div className="seat-cardcount" aria-hidden>
-        {Array.from({ length: Math.min(p.hand_count, 6) }).map((_, i) => (
-          <CardBack key={i} size="sm" />
-        ))}
-      </div>
     </div>
   );
 }
 
 export default function GameTable() {
-  const { game, playerId, placeBid, playCard } = useStore(
+  const { game, playerId, placeBid, playCard, reset } = useStore(
     useShallow((s) => ({
       game: s.game as GameState,
       playerId: s.playerId!,
       placeBid: s.placeBid,
       playCard: s.playCard,
+      reset: s.reset,
     }))
   );
 
@@ -71,20 +68,30 @@ export default function GameTable() {
 
   return (
     <div className="screen table-screen">
-      {/* Top status bar */}
+      {/* Top status bar: Scores (left) | round info (center) | Leave (right) */}
       <div className="status-bar">
-        <div className="status-chip">
-          Round <strong>{game.round_index + 1}</strong> / {game.total_rounds}
+        <div className="status-left">
+          <Scorecard game={game} playerId={playerId} />
         </div>
-        <div className="status-chip">
-          <strong>{game.cards_this_round}</strong> cards
-        </div>
-        {game.trump && (
-          <div className={`trump-chip ${isRed(game.trump) ? "red" : "black"}`}>
-            Trump <span className="trump-symbol">{suitSymbol(game.trump)}</span>
-            <small>{VARIANT_TRUMP_NAME[game.trump]}</small>
+        <div className="status-center">
+          <div className="status-chip">
+            Round <strong>{game.round_index + 1}</strong> / {game.total_rounds}
           </div>
-        )}
+          {game.trump && (
+            <div className={`trump-chip ${isRed(game.trump) ? "red" : "black"}`}>
+              Trump <span className="trump-symbol">{suitSymbol(game.trump)}</span>
+              <small>{VARIANT_TRUMP_NAME[game.trump]}</small>
+            </div>
+          )}
+          <div className="status-chip">
+            <strong>{game.cards_this_round}</strong> cards
+          </div>
+        </div>
+        <div className="status-right">
+          <button className="leave-btn" onClick={reset} title="Leave game">
+            ← Leave
+          </button>
+        </div>
       </div>
 
       {/* Opponents */}
@@ -134,10 +141,9 @@ export default function GameTable() {
       <div className={`your-area${isMyTurn ? " active" : ""}`}>
         <div className="your-tag">
           {me.name} (you)
-          {game.phase !== "bidding" && (
+          {me.bid !== null && (
             <span className="your-stats">
-              won {me.tricks_won}
-              {me.bid !== null && ` / bid ${me.bid}`}
+              won {me.tricks_won} / bid {me.bid}
             </span>
           )}
         </div>

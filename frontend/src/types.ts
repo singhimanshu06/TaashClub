@@ -12,6 +12,7 @@ export interface LobbyPlayer {
   name: string;
   seat: number;
   connected: boolean;
+  is_bot?: boolean;
 }
 
 export interface Lobby {
@@ -32,6 +33,8 @@ export interface StatePlayer {
   hand_count: number;
   hand: CardT[] | null; // only for the viewer
   connected: boolean;
+  is_bot?: boolean;
+  total_score: number; // cumulative through completed rounds (0 during round 1)
 }
 
 export interface TrickCard {
@@ -46,6 +49,13 @@ export interface RoundResultRow {
   tricks_won: number;
   points: number;
   hit: boolean;
+}
+
+export interface RoundHistoryEntry {
+  round_index: number;
+  trump: Suit | null;
+  cards_this_round: number;
+  results: RoundResultRow[];
 }
 
 export interface Standing {
@@ -72,6 +82,7 @@ export interface GameState {
   players: StatePlayer[];
   your_legal_cards: CardT[] | null;
   last_round_result: RoundResultRow[] | null;
+  round_history: RoundHistoryEntry[];
   final_standings: Standing[] | null;
 }
 

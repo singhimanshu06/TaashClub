@@ -236,3 +236,72 @@ def test_full_game_reaches_game_end():
     standings = g.final_standings()
     assert len(standings) == 4
     assert [s["rank"] for s in standings] == [1, 2, 3, 4]
+
+
+# --- round history & mid-game scoreboard -------------------------------
+def test_round_history_accumulates_one_entry_per_round():
+    g = new_game(4, Variant.SINGLE_RUN, seed=11)
+    g.start()
+    assert g.round_history == []
+    _fast_forward_round(g)  # round 0 done
+    assert len(g.round_history) == 1
+    entry = g.round_history[0]
+    assert entry["round_index"] == 0
+    assert entry["trump"] == Suit.SPADE.value  # round 0 trump
+    assert entry["cards_this_round"] == 13
+    assert len(entry["results"]) == 4
+    # Per-round points are present and sum consistently with last_round_result.
+    pts = {r["player_id"]: r["points"] for r in entry["results"]}
+    last_pts = {r["player_id"]: r["points"] for r in g.last_round_result}
+    assert pts == last_pts
+
+    _fast_forward_round(g)  # round 1 done
+    assert len(g.round_history) == 2
+    assert g.round_history[1]["round_index"] == 1
+    assert g.round_history[1]["trump"] == Suit.HEART.value
+
+
+def test_round_history_covers_all_rounds_at_game_end():
+    g = new_game(4, Variant.SINGLE_RUN, seed=7)
+    g.start()
+    guard = 0
+    while g.phase != Phase.GAME_END and guard < 100:
+        _fast_forward_round(g)
+        guard += 1
+    # single_run of 4p = 13 rounds -> 13 history entries (rounds 0..12).
+    assert len(g.round_history) == g.total_rounds
+    assert [e["round_index"] for e in g.round_history] == list(range(13))
+    # Trump cycle is preserved across the history.
+    trumps = [e["trump"] for e in g.round_history]
+    assert trumps[:4] == ["S", "H", "C", "D"]
+    assert trumps[4] == "S"
+
+
+def test_total_score_exposed_mid_game_in_to_state():
+    """Cumulative totals are sent to clients during play (not just at game end)."""
+    g = new_game(4, seed=5)
+    g.start()
+    # Round 0 still in progress: everyone's cumulative total is 0.
+    state = g.to_state("p0")
+    assert all(p["total_score"] == 0 for p in state["players"])
+    assert state["round_history"] == []
+
+    # Finish round 0 with a known scoring setup.
+    _fast_forward_round(g)
+    state = g.to_state("p0")
+    # After round 0 ends, the per-player total_score in to_state reflects round 0.
+    assert sum(p["total_score"] for p in state["players"]) == sum(
+        r["points"] for r in g.round_history[0]["results"]
+    )
+    # round_history is now populated and exposed via to_state.
+    assert len(state["round_history"]) == 1
+
+
+def test_to_state_round_history_matches_engine_round_history():
+    g = new_game(4, seed=9)
+    g.start()
+    for _ in range(3):
+        _fast_forward_round(g)
+    state = g.to_state("p0")
+    assert state["round_history"] == g.round_history
+    assert len(state["round_history"]) == 3

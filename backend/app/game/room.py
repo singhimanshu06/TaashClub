@@ -9,6 +9,7 @@ from typing import Optional
 
 from fastapi import WebSocket
 
+from .bot import random_bot_name
 from .engine import Game, GameError
 from .models import Player, Variant
 
@@ -33,10 +34,24 @@ class Room:
     sockets: dict[str, WebSocket] = field(default_factory=dict)
     chat_log: list[dict] = field(default_factory=list)
     clearing: bool = False   # guards the async post-trick clear (one task at a time)
+    # Bot driver bookkeeping. bot_busy prevents scheduling two bot actions for
+    # the same turn; _bot_tasks holds strong refs to in-flight bot/auto-advance
+    # tasks so the event loop doesn't garbage-collect them mid-flight (a known
+    # asyncio footgun when the only reference is dropped too early).
+    bot_busy: bool = False
+    auto_advance_busy: bool = False
+    _bot_tasks: set = field(default_factory=set)
+    # Pending disconnect→bot conversion tasks, keyed by player_id. Cancelled if
+    # the player reconnects before the grace period expires.
+    conversion_timers: dict = field(default_factory=dict)
 
     @property
     def started(self) -> bool:
         return self.game is not None
+
+    @property
+    def has_bots(self) -> bool:
+        return any(p.is_bot for p in self.players)
 
     def add_chat(self, player_id: str, text: str) -> Optional[dict]:
         text = (text or "").strip()[:CHAT_MAX_LEN]
@@ -69,6 +84,23 @@ class Room:
             self.host_id = player.id
         return player
 
+    def add_bot(self) -> Player:
+        """Fill the next empty seat with a server-driven bot (no socket)."""
+        if self.started:
+            raise GameError("game already started")
+        if self.is_full():
+            raise GameError("room is full")
+        taken = {p.name for p in self.players}
+        bot = Player(id="bot-" + _gen_code(random.Random()) + str(len(self.players)),
+                     name=random_bot_name(random.Random(), taken),
+                     join_order=len(self.players),
+                     connected=True,
+                     is_bot=True)
+        self.players.append(bot)
+        if self.host_id is None:
+            self.host_id = bot.id
+        return bot
+
     def has_player(self, player_id: str) -> bool:
         return any(p.id == player_id for p in self.players)
 
@@ -88,6 +120,15 @@ class Room:
         self.game = Game(self.num_players, self.variant, self.players)
         self.game.start()
 
+    def add_bots(self, player_id: str) -> None:
+        """Host-only: fill all remaining seats with bots (lobby only)."""
+        if player_id != self.host_id:
+            raise GameError("only the host can add bots")
+        if self.started:
+            raise GameError("game already started")
+        while not self.is_full():
+            self.add_bot()
+
     def lobby_snapshot(self) -> dict:
         return {
             "code": self.code,
@@ -96,7 +137,7 @@ class Room:
             "host_id": self.host_id,
             "started": self.started,
             "players": [
-                {"id": p.id, "name": p.name, "seat": p.join_order, "connected": p.connected}
+                {"id": p.id, "name": p.name, "seat": p.join_order, "connected": p.connected, "is_bot": p.is_bot}
                 for p in self.players
             ],
         }

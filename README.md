@@ -14,7 +14,36 @@ suit cycles every round.
 - **Trump:** cycles Spade → Heart → Club → Diamond by round.
 - **Play:** follow the led suit if you can; otherwise play any card. Highest trump wins the trick, else highest of the led suit.
 - **First bidder:** rotates by join order each round (R1 = 1st joiner, R2 = 2nd, …), cycling through all seats.
-- **Scoreboard:** revealed only at the end of the game.
+- **Scoreboard:** a cumulative scorecard is available behind a **Scores** toggle on
+  the game screen (totals through the last completed round). At game end the final
+  standings are shown, with a **Detailed scores** button revealing a round-by-round
+  breakdown (one row per round, one column per player, points only; the highest
+  score in each row/column is green, the lowest is red).
+
+## Bots
+Don't have enough friends online? Toggle **Play with bots** on the home screen
+and the room fills the remaining 3 seats with AI bots (bot games are always
+4-player: 1 human + 3 bots). Bots are server-driven — they bid and play on
+their own with a short "thinking" delay, and the round auto-advances so the
+match keeps moving without you clicking through every scoreboard.
+
+Bot behavior:
+- **Bidding:** heuristic that counts likely winners (high trumps, off-suit
+  aces, borderline trump face cards), clamped to `[0, cards_this_round]`, with
+  small jitter so identical hands don't all bid the same.
+- **Play:** always follows the led suit when held. When still chasing tricks
+  (`tricks_won < bid`) it tries to win cheaply (lowest winning legal card, trump
+  only when it actually wins and is needed); otherwise it dumps the lowest legal
+  card, preserving trumps.
+- **Names:** bots pick from a pool of ~25 short quirky names (e.g. `SirTrump`,
+  `Trumpzilla`, `QueenBee`, `Diamondog`), no duplicates within a game.
+
+Bot timing is tunable via env vars (defaults shown):
+```
+LAKDI_BOT_THINK_MIN=0.6      # min "thinking" delay per bot action (seconds)
+LAKDI_BOT_THINK_MAX=1.2      # max delay
+LAKDI_BOT_AUTO_ADVANCE=6     # ROUND_END auto-advance grace period
+```
 
 ## Run it
 
@@ -40,6 +69,9 @@ Vite **Network** URL on phones/other computers on the same Wi-Fi lets them join 
 Open the app, **Create Room** (pick players + variant + your name), share the 4-char
 room code. Everyone else opens the app, **Join Room**, enters the code and their name.
 When all seats are filled the host presses **Start Game**.
+
+To play solo against bots, tick **Play with bots** when creating a room — the 3
+remaining seats fill with AI and the game starts immediately. See **Bots** below.
 
 ## Play with friends on other networks (public link)
 
@@ -74,19 +106,36 @@ WebSocket automatically uses `wss://` over the HTTPS tunnel.
 ## Tests
 ```bash
 cd backend
-.venv/bin/python -m pytest -q                 # pure engine unit tests
-.venv/bin/python tests/smoke_full_game.py     # full game over the socket (server must be running)
+.venv/bin/python -m pytest -q                 # pure engine + bot unit tests
+.venv/bin/python tests/smoke_full_game.py     # full all-human game over the socket (server must be running)
+.venv/bin/python tests/smoke_bots.py          # 1 human + 3 bots full game (server must be running)
 ```
+
+For fast smoke runs set `LAKDI_TRICK_HOLD=0 LAKDI_BOT_THINK_MIN=0.01
+LAKDI_BOT_THINK_MAX=0.05 LAKDI_BOT_AUTO_ADVANCE=0.3` (and `LAKDI_PORT=8123` if
+the server isn't on the default 8000).
 
 ## Architecture
 Server-authoritative. The Python engine (`backend/app/game/engine.py`) owns all
 rules and state; the React client renders a **redacted** per-player view (you only
 see your own hand) and sends intents over a WebSocket.
 
-- `backend/app/game/` — `models.py`, `engine.py` (pure rules), `room.py` (rooms + sockets)
-- `backend/app/main.py` — FastAPI REST + WebSocket endpoints
-- `frontend/src/` — `store.ts` (state + socket), `components/` (Home, Lobby, GameTable, …)
+- `backend/app/game/` — `models.py`, `engine.py` (pure rules + `round_history`), `room.py` (rooms + sockets), `bot.py` (bot brain + name pool)
+- `backend/app/main.py` — FastAPI REST + WebSocket endpoints; hosts the bot driver (schedules bot turns and auto-advance)
+- `frontend/src/` — `store.ts` (state + socket), `components/` (Home, Lobby, GameTable, Scorecard, DetailedScores, …)
+
+### How bots are driven
+Bots are plain `Player` objects flagged `is_bot=True` with no WebSocket of their
+own — the server applies their decisions directly to the engine. A single
+`_after_state_change(room)` coroutine is the hub for every state mutation
+(client events, bot actions, trick commit): it broadcasts, schedules the
+post-trick hold, and — if the current turn belongs to a bot — spawns one
+"think then act" task per bot turn. Guards (`bot_busy`, `auto_advance_busy`)
+prevent duplicate scheduling, and a strong-ref set (`room._bot_tasks`) keeps
+in-flight tasks from being garbage-collected mid-flight.
 
 ### MVP scope / not yet included
 Guest play only (no accounts/DB — rooms live in memory and reset on server restart),
-no chat, no AI bots, minimal disconnect handling.
+no chat, minimal disconnect handling. Bots play a single "normal" heuristic level
+(no difficulty selection, no per-seat mixing of humans + bots beyond the 4-player
+bot mode).

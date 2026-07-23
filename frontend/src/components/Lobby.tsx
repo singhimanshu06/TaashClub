@@ -53,13 +53,14 @@ function InviteLink({ code }: { code: string }) {
 }
 
 export default function Lobby() {
-  const { lobby, playerId, code, connected, startGame } = useStore(
+  const { lobby, playerId, code, connected, startGame, reset } = useStore(
     useShallow((s) => ({
       lobby: s.lobby,
       playerId: s.playerId,
       code: s.code,
       connected: s.connected,
       startGame: s.startGame,
+      reset: s.reset,
     }))
   );
 
@@ -77,6 +78,9 @@ export default function Lobby() {
 
   return (
     <div className="screen lobby-screen">
+      <button className="leave-btn" onClick={reset} title="Leave room">
+        ← Leave
+      </button>
       <div className="lobby-card">
         <div className="room-code-badge">
           <span>Room code</span>

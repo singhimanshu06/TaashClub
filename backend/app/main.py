@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .game.engine import GameError
-from .game.models import Card
+from .game.models import Card, Phase
 from .game.room import ConnectionManager, RoomManager, Room
+from .game.bot import bot_bid, bot_play
 from .protocol import (
     CreateRoomRequest,
     CreateRoomResponse,
@@ -20,7 +22,18 @@ from .protocol import (
 
 # How long a completed trick stays on the table before it clears. Override with
 # LAKDI_TRICK_HOLD (e.g. 0 in automated tests).
-TRICK_HOLD_SECONDS = float(os.environ.get("LAKDI_TRICK_HOLD", "5"))
+TRICK_HOLD_SECONDS = float(os.environ.get("LAKDI_TRICK_HOLD", "3"))
+# Bot "thinking" delay range (seconds). Jittered per action for a human feel.
+BOT_THINK_MIN = float(os.environ.get("LAKDI_BOT_THINK_MIN", "0.6"))
+BOT_THINK_MAX = float(os.environ.get("LAKDI_BOT_THINK_MAX", "1.2"))
+# How long a bot game waits in ROUND_END before auto-advancing. Set high enough
+# for a human to read the scoreboard, low enough to keep the game moving. 0
+# disables auto-advance (the human must always click).
+BOT_AUTO_ADVANCE_SECONDS = float(os.environ.get("LAKDI_BOT_AUTO_ADVANCE", "6"))
+# How long to wait after a player disconnects before converting their seat to a
+# bot (so the game continues for everyone else). If they reconnect before this
+# fires, the conversion is cancelled.
+BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("LAKDI_BOT_CONVERSION_GRACE", "30"))
 
 app = FastAPI(title="LAKDI")
 
@@ -74,15 +87,28 @@ async def game_socket(ws: WebSocket, code: str, player_id: str):
     try:
         room = rooms.get(code)
     except GameError:
+        # Must accept the WebSocket before closing, otherwise the custom close
+        # code is lost and the client sees an abnormal 1006 close (which it
+        # treats as a transient drop and retries forever instead of giving up).
+        await ws.accept()
         await ws.close(code=4004)
         return
     if not room.has_player(player_id):
+        await ws.accept()
         await ws.close(code=4003)
         return
 
     await connections.connect(room, player_id, ws)
+
+    # Player reconnected — cancel any pending disconnect→bot conversion. If
+    # they were already converted (came back late), take back control.
+    _cancel_conversion(room, player_id)
+    for p in room.players:
+        if p.id == player_id:
+            p.is_bot = False
+
     await connections.send_to(room, player_id, {"type": "chat_history", "messages": room.chat_log})
-    await connections.broadcast_state(room)
+    await _after_state_change(room)
 
     try:
         while True:
@@ -90,7 +116,8 @@ async def game_socket(ws: WebSocket, code: str, player_id: str):
             await handle_event(room, player_id, msg)
     except WebSocketDisconnect:
         connections.disconnect(room, player_id)
-        await connections.broadcast_state(room)
+        _schedule_conversion_if_needed(room, player_id)
+        await _after_state_change(room)
 
 
 async def handle_event(room: Room, player_id: str, msg: dict) -> None:
@@ -106,11 +133,15 @@ async def handle_event(room: Room, player_id: str, msg: dict) -> None:
     try:
         if event == "start_game":
             room.start_game(player_id)
+        elif event == "add_bots":
+            room.add_bots(player_id)
         elif event == "place_bid":
             _require_game(room).place_bid(player_id, int(msg["value"]))
         elif event == "play_card":
             _require_game(room).play_card(player_id, Card.from_dict(msg["card"]))
         elif event == "advance_round":
+            # Cancel any pending bot auto-advance so it can't double-fire.
+            _cancel_auto_advance(room)
             _require_game(room).advance_round()
         else:
             await connections.send_to(room, player_id,
@@ -123,13 +154,45 @@ async def handle_event(room: Room, player_id: str, msg: dict) -> None:
         await connections.send_to(room, player_id, {"type": "error", "message": "malformed message"})
         return
 
+    await _after_state_change(room)
+
+
+async def _after_state_change(room: Room) -> None:
+    """Central post-action routine: broadcast, then drive the async side
+    effects (trick hold, bot turns, bot auto-advance).
+
+    Every state mutation path (client events, bot actions, trick commit) funnels
+    through here so the bots see a consistent post-state hook.
+    """
     await connections.broadcast_state(room)
 
+    game = room.game
+    if game is None:
+        return
+
     # A completed trick is held on the table, then cleared after a short delay.
-    # Guard with room.clearing so only one hold task runs per trick.
-    if room.game and room.game.awaiting_trick_clear and not room.clearing:
+    if game.awaiting_trick_clear and not room.clearing:
         room.clearing = True
         asyncio.create_task(_hold_and_clear_trick(room))
+        return
+
+    # If it's a bot's turn to act, schedule its "think then act" task (one at a
+    # time per room — bot_busy guards against duplicate scheduling). The task
+    # ref is kept in room._bot_tasks so it isn't GC'd before it completes.
+    if game.phase in (Phase.BIDDING, Phase.PLAYING) and not room.bot_busy:
+        current = game.players[game.turn_idx]
+        if current.is_bot:
+            room.bot_busy = True
+            t = asyncio.create_task(_bot_act(room, current.id))
+            room._bot_tasks.add(t)
+            t.add_done_callback(room._bot_tasks.discard)
+
+    # Bot games auto-advance from ROUND_END so the match keeps moving on its own.
+    if game.phase == Phase.ROUND_END and room.has_bots and not room.auto_advance_busy:
+        room.auto_advance_busy = True
+        t = asyncio.create_task(_bot_auto_advance(room))
+        room._bot_tasks.add(t)
+        t.add_done_callback(room._bot_tasks.discard)
 
 
 async def _hold_and_clear_trick(room: Room) -> None:
@@ -137,15 +200,138 @@ async def _hold_and_clear_trick(room: Room) -> None:
         await asyncio.sleep(TRICK_HOLD_SECONDS)
         if room.game and room.game.awaiting_trick_clear:
             room.game.commit_trick()
-            # Release the guard *before* broadcasting. broadcast_state() awaits
-            # (yields to the event loop) and commit_trick() has already reopened
-            # play, so the guard must be clear here — otherwise a trick that
-            # completes during the broadcast would find clearing=True, skip
+            # Release the guard *before* broadcasting. _after_state_change()
+            # awaits (yields to the event loop) and commit_trick() has already
+            # reopened play, so the guard must be clear here — otherwise a trick
+            # that completes during the broadcast would find clearing=True, skip
             # scheduling its own clear, and the round would deadlock.
             room.clearing = False
-            await connections.broadcast_state(room)
+            await _after_state_change(room)
     finally:
         room.clearing = False
+
+
+async def _bot_act(room: Room, player_id: str) -> None:
+    """Think for a short jittered delay, then apply one bot action (bid or
+    play) directly to the engine and re-enter the post-state-change loop.
+
+    The ``bot_busy`` guard is released *synchronously* before re-entering the
+    loop (no await gap), so the loop can schedule the next bot immediately.
+    It is NOT cleared in a ``finally`` — doing so would clobber the guard that
+    ``_after_state_change`` just set for the next bot and drop that task's only
+    reference, letting the loop GC it mid-flight. On sleep cancellation we
+    release explicitly so the room doesn't deadlock.
+    """
+    try:
+        await asyncio.sleep(random.uniform(BOT_THINK_MIN, BOT_THINK_MAX))
+    except asyncio.CancelledError:
+        room.bot_busy = False
+        raise
+    # Hand off the slot synchronously: the next _after_state_change call below
+    # may set bot_busy=True again for the following bot.
+    room.bot_busy = False
+    game = room.game
+    if game is None:
+        return
+    # Abort if the turn moved away or the player reconnected (no longer a bot).
+    current = game.players[game.turn_idx]
+    if current.id != player_id or not current.is_bot:
+        return
+    if game.phase == Phase.BIDDING:
+        game.place_bid(player_id, bot_bid(game, player_id, random.Random()))
+    elif game.phase == Phase.PLAYING and not game.awaiting_trick_clear:
+        card = bot_play(game, player_id, random.Random())
+        game.play_card(player_id, card)
+    else:
+        return
+    await _after_state_change(room)
+
+
+async def _bot_auto_advance(room: Room) -> None:
+    """Wait, then advance to the next round if we're still sitting at ROUND_END.
+
+    A human clicking advance supersedes this via ``_cancel_auto_advance``; the
+    phase check makes the task a no-op if state has already moved on. The guard
+    is released before re-entering the loop for the same reason as ``_bot_act``.
+    """
+    try:
+        await asyncio.sleep(BOT_AUTO_ADVANCE_SECONDS)
+    except asyncio.CancelledError:
+        room.auto_advance_busy = False
+        raise
+    room.auto_advance_busy = False
+    game = room.game
+    if game is not None and game.phase == Phase.ROUND_END:
+        game.advance_round()
+        await _after_state_change(room)
+
+
+def _cancel_auto_advance(room: Room) -> None:
+    """Cancel a pending auto-advance so a manual advance can't double-fire."""
+    room.auto_advance_busy = False
+    # Cancel any in-flight auto-advance coroutine still pending. We identify
+    # them by their coroutine's qualified name (robust across calls).
+    for t in list(room._bot_tasks):
+        if not t.done() and "auto_advance" in getattr(t.get_coro(), "__qualname__", ""):
+            t.cancel()
+
+
+def _schedule_conversion_if_needed(room: Room, player_id: str) -> None:
+    """After a disconnect, start the grace timer to convert the seat to a bot.
+
+    Only fires if a game is in progress (not lobby/game_end) and the player
+    isn't already a bot. If the player reconnects before the timer fires, the
+    conversion is cancelled (see _cancel_conversion in the connect path).
+    """
+    game = room.game
+    if game is None or game.phase in (Phase.LOBBY, Phase.GAME_END):
+        return
+    player = next((p for p in room.players if p.id == player_id), None)
+    if player is None or player.is_bot:
+        return
+    _cancel_conversion(room, player_id)  # de-dupe in case one is already pending
+    t = asyncio.create_task(_maybe_convert_to_bot(room, player_id))
+    room.conversion_timers[player_id] = t
+
+
+def _cancel_conversion(room: Room, player_id: str) -> None:
+    """Cancel a pending disconnect→bot conversion (player reconnected in time)."""
+    t = room.conversion_timers.pop(player_id, None)
+    if t is not None and not t.done():
+        t.cancel()
+
+
+async def _maybe_convert_to_bot(room: Room, player_id: str) -> None:
+    """After the grace period, convert a still-disconnected player to a bot.
+
+    If all human players are now gone (no connected non-bot players), end the
+    game immediately instead — there's nobody left to play for.
+    """
+    try:
+        await asyncio.sleep(BOT_CONVERSION_GRACE_SECONDS)
+    except asyncio.CancelledError:
+        return
+
+    room.conversion_timers.pop(player_id, None)
+    game = room.game
+    if game is None or game.phase in (Phase.LOBBY, Phase.GAME_END):
+        return
+
+    player = next((p for p in room.players if p.id == player_id), None)
+    if player is None or player.is_bot or player.connected:
+        return  # reconnected, already a bot, or gone — nothing to do
+
+    player.is_bot = True
+
+    # If no connected human players remain, end the game — nobody to play for.
+    humans_alive = any(not p.is_bot and p.connected for p in room.players)
+    if not humans_alive:
+        # Cancel any other pending conversions — the game is over.
+        for pid in list(room.conversion_timers):
+            _cancel_conversion(room, pid)
+        game.force_end()
+
+    await _after_state_change(room)
 
 
 def _require_game(room):

@@ -11,7 +11,6 @@ export default function BidPanel({ maxBid, onBid }: Props) {
 
   return (
     <div className="bid-panel">
-      <span className="bid-prompt">Your bid — win exactly this many for 10 + bid:</span>
       <div className="bid-row">
         <div className="bid-stepper">
           <button

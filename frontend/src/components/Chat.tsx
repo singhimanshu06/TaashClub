@@ -10,6 +10,7 @@ export default function Chat() {
   const [text, setText] = useState("");
   const [seen, setSeen] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const winRef = useRef<HTMLDivElement>(null);
 
   // Track unread count while the window is minimized.
   useEffect(() => {
@@ -20,6 +21,16 @@ export default function Chat() {
   useEffect(() => {
     if (open && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages, open]);
+
+  // Close on outside click when the chat window is open.
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (winRef.current && !winRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
 
   const unread = messages.length - seen;
 
@@ -39,7 +50,7 @@ export default function Chat() {
   }
 
   return (
-    <div className="chat-window">
+    <div className="chat-window" ref={winRef}>
       <div className="chat-header">
         <span>Game chat</span>
         <button className="chat-min" onClick={() => setOpen(false)} aria-label="Minimize chat">

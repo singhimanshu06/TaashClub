@@ -74,6 +74,7 @@ class Player:
     tricks_won: int = 0          # tricks won this round
     total_score: int = 0         # cumulative across rounds
     connected: bool = True
+    is_bot: bool = False         # server-driven AI seat (no socket)
 
 
 def build_deck() -> list[Card]:
