@@ -7,16 +7,26 @@ function roomFromUrl(): string {
   return new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
 }
 
+const RULES = [
+  "4–6 players. Hand size shrinks each round down to 1 card (Single run) or down-and-up.",
+  "Each round, bid the EXACT number of tricks you'll win. Hit it → 10 + bid points; miss (over or under) → 0.",
+  "Trump cycles every round: Spades → Hearts → Clubs → Diamonds.",
+  "Follow the led suit if you can; otherwise play any card. Highest trump wins, else highest of the led suit.",
+  "First bidder rotates each round. Final scoreboard revealed only at game end.",
+];
+
 export default function Home() {
   const enterRoom = useStore((s) => s.enterRoom);
   const initialRoom = roomFromUrl();
   const [mode, setMode] = useState<"create" | "join">(initialRoom ? "join" : "create");
+  const [bots, setBots] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState(initialRoom);
   const [numPlayers, setNumPlayers] = useState(4);
   const [variant, setVariant] = useState<Variant>("single_run");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showRules, setShowRules] = useState(false);
 
   const startCardsFor = (n: number) => Math.floor(52 / n);
 
@@ -28,10 +38,11 @@ export default function Home() {
     try {
       let roomCode = code.trim().toUpperCase();
       if (mode === "create") {
-        roomCode = (await createRoom(numPlayers, variant)).code;
+        // Bot games are always 4-player (1 human + 3 bots).
+        roomCode = (await createRoom(bots ? 4 : numPlayers, variant)).code;
       }
       const joined = await joinRoom(roomCode, name.trim());
-      enterRoom(joined.code, joined.player_id);
+      enterRoom(joined.code, joined.player_id, bots);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -44,8 +55,19 @@ export default function Home() {
       <div className="home-card">
         <h1 className="logo">
           LAKDI <span className="logo-suits">♠♥♣♦</span>
+          <button className="info-btn" onClick={() => setShowRules((v) => !v)} title="How to play">
+            i
+          </button>
         </h1>
-        <p className="tagline">Callbreak — decreasing-cards, exact-bid card game</p>
+        {showRules && (
+          <div className="rules-popup">
+            <ul className="rules-list">
+              {RULES.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="segmented">
           <button className={mode === "create" ? "seg active" : "seg"} onClick={() => setMode("create")}>
@@ -55,6 +77,17 @@ export default function Home() {
             Join Room
           </button>
         </div>
+
+        {mode === "create" && (
+          <label className="field field-toggle">
+            <input
+              type="checkbox"
+              checked={bots}
+              onChange={(e) => setBots(e.target.checked)}
+            />
+            <span>Play with bots (fills 3 seats with AI)</span>
+          </label>
+        )}
 
         <label className="field">
           <span>Your name</span>
@@ -85,6 +118,7 @@ export default function Home() {
                   <button
                     key={n}
                     className={numPlayers === n ? "chip active" : "chip"}
+                    disabled={bots}
                     onClick={() => setNumPlayers(n)}
                   >
                     {n}
@@ -92,6 +126,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+              {bots && <small className="field-note">Bot games are always 4 players.</small>}
             </div>
             <div className="field">
               <span>Game length</span>
@@ -118,7 +153,7 @@ export default function Home() {
         {err && <div className="inline-error">{err}</div>}
 
         <button className="btn-primary" disabled={busy} onClick={handleSubmit}>
-          {busy ? "Please wait…" : mode === "create" ? "Create & Join" : "Join Game"}
+          {busy ? "Please wait…" : mode === "join" ? "Join Game" : bots ? "Play with Bots" : "Create & Join"}
         </button>
       </div>
     </div>
