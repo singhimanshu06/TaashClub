@@ -2,6 +2,12 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# IMPORTANT: This app stores room/player state in process memory (RoomManager
+# in backend/app/game/room.py). It MUST run as a single machine — multiple
+# machines would each have their own in-memory state and return "room not
+# found" for rooms created on a different instance. After any deploy or config
+# change, verify with `fly scale count 1` to prevent Fly from maintaining
+# extra machines.
 
 app = 'lakdi'
 primary_region = 'lhr'
