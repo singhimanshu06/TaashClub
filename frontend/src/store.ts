@@ -78,7 +78,7 @@ function clearSession() {
 function handleMessage(set: (partial: Partial<Store> | ((s: Store) => Partial<Store>)) => void, ev: MessageEvent) {
   const msg = JSON.parse(ev.data);
   if (msg.type === "lobby_update") {
-    set({ lobby: msg.lobby });
+    set({ lobby: msg.lobby, screen: "lobby", reconnecting: false, reconnectAttempt: 0 });
   } else if (msg.type === "state_update") {
     const game: GameState = msg.state;
     set({ game, screen: game.phase === "lobby" ? "lobby" : "game", reconnecting: false });
@@ -152,8 +152,19 @@ function scheduleReconnect(
 ) {
   if (intendedClose) return;
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    // Exhausted retries — stay on reconnecting screen with a manual retry prompt.
-    set({ reconnecting: true, reconnectAttempt: 0 });
+    // Exhausted retries — session is unreachable. Clear it and return to home
+    // so the user isn't trapped on a dead reconnecting screen.
+    clearSession();
+    set({
+      screen: "home",
+      code: null,
+      playerId: null,
+      lobby: null,
+      game: null,
+      reconnecting: false,
+      reconnectAttempt: 0,
+      error: "Connection lost. Please create or join a new room.",
+    });
     socket = null;
     return;
   }
