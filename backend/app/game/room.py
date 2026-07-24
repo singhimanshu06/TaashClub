@@ -120,6 +120,16 @@ class Room:
         self.game = Game(self.num_players, self.variant, self.players)
         self.game.start()
 
+    def add_one_bot(self, player_id: str) -> None:
+        """Host-only: add a single bot to the next empty seat (lobby only)."""
+        if player_id != self.host_id:
+            raise GameError("only the host can add bots")
+        if self.started:
+            raise GameError("game already started")
+        if self.is_full():
+            raise GameError("room is full")
+        self.add_bot()
+
     def add_bots(self, player_id: str) -> None:
         """Host-only: fill all remaining seats with bots (lobby only)."""
         if player_id != self.host_id:

@@ -19,7 +19,6 @@ export default function Home() {
   const enterRoom = useStore((s) => s.enterRoom);
   const initialRoom = roomFromUrl();
   const [mode, setMode] = useState<"create" | "join">(initialRoom ? "join" : "create");
-  const [bots, setBots] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState(initialRoom);
   const [numPlayers, setNumPlayers] = useState(4);
@@ -38,11 +37,10 @@ export default function Home() {
     try {
       let roomCode = code.trim().toUpperCase();
       if (mode === "create") {
-        // Bot games are always 4-player (1 human + 3 bots).
-        roomCode = (await createRoom(bots ? 4 : numPlayers, variant)).code;
+        roomCode = (await createRoom(numPlayers, variant)).code;
       }
       const joined = await joinRoom(roomCode, name.trim());
-      enterRoom(joined.code, joined.player_id, bots);
+      enterRoom(joined.code, joined.player_id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -78,17 +76,6 @@ export default function Home() {
           </button>
         </div>
 
-        {mode === "create" && (
-          <label className="field field-toggle">
-            <input
-              type="checkbox"
-              checked={bots}
-              onChange={(e) => setBots(e.target.checked)}
-            />
-            <span>Play with bots (fills 3 seats with AI)</span>
-          </label>
-        )}
-
         <label className="field">
           <span>Your name</span>
           <input
@@ -118,7 +105,6 @@ export default function Home() {
                   <button
                     key={n}
                     className={numPlayers === n ? "chip active" : "chip"}
-                    disabled={bots}
                     onClick={() => setNumPlayers(n)}
                   >
                     {n}
@@ -126,7 +112,6 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              {bots && <small className="field-note">Bot games are always 4 players.</small>}
             </div>
             <div className="field">
               <span>Game length</span>
@@ -153,7 +138,7 @@ export default function Home() {
         {err && <div className="inline-error">{err}</div>}
 
         <button className="btn-primary" disabled={busy} onClick={handleSubmit}>
-          {busy ? "Please wait…" : mode === "join" ? "Join Game" : bots ? "Play with Bots" : "Create & Join"}
+          {busy ? "Please wait…" : mode === "join" ? "Join Game" : "Create & Join"}
         </button>
       </div>
     </div>

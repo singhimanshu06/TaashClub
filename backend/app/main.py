@@ -133,6 +133,8 @@ async def handle_event(room: Room, player_id: str, msg: dict) -> None:
     try:
         if event == "start_game":
             room.start_game(player_id)
+        elif event == "add_bot":
+            room.add_one_bot(player_id)
         elif event == "add_bots":
             room.add_bots(player_id)
         elif event == "place_bid":

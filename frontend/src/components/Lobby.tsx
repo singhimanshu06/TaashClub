@@ -53,13 +53,14 @@ function InviteLink({ code }: { code: string }) {
 }
 
 export default function Lobby() {
-  const { lobby, playerId, code, connected, startGame, reset } = useStore(
+  const { lobby, playerId, code, connected, startGame, addBot, reset } = useStore(
     useShallow((s) => ({
       lobby: s.lobby,
       playerId: s.playerId,
       code: s.code,
       connected: s.connected,
       startGame: s.startGame,
+      addBot: s.addBot,
       reset: s.reset,
     }))
   );
@@ -118,9 +119,16 @@ export default function Lobby() {
         </ol>
 
         {isHost ? (
-          <button className="btn-primary" disabled={!full} onClick={startGame}>
-            {full ? "Start Game" : `Waiting for ${lobby.num_players - lobby.players.length} more…`}
-          </button>
+          <>
+            {!full && (
+              <button className="btn-secondary" onClick={addBot}>
+                + Add Bot
+              </button>
+            )}
+            <button className="btn-primary" disabled={!full} onClick={startGame}>
+              {full ? "Start Game" : `Waiting for ${lobby.num_players - lobby.players.length} more…`}
+            </button>
+          </>
         ) : (
           <p className="waiting-text">Waiting for the host to start…</p>
         )}

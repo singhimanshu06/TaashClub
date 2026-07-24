@@ -25,9 +25,10 @@ interface Store {
   reconnectAttempt: number; // 0 when idle, 1..N when retrying
   messages: ChatMessage[];
 
-  enterRoom: (code: string, playerId: string, botMode?: boolean) => void;
+  enterRoom: (code: string, playerId: string) => void;
   reconnect: () => void;
   startGame: () => void;
+  addBot: () => void;
   addBots: () => void;
   placeBid: (value: number) => void;
   playCard: (card: CardT) => void;
@@ -198,15 +199,10 @@ export const useStore = create<Store>((set, get) => ({
   reconnectAttempt: 0,
   messages: [],
 
-  enterRoom: (code, playerId, botMode) => {
+  enterRoom: (code, playerId) => {
     saveSession(code, playerId);
     set({ code, playerId, screen: "lobby", messages: [], reconnecting: false, reconnectAttempt: 0 });
-    openSocket(set, get, code, playerId, () => {
-      if (botMode) {
-        send({ type: "add_bots" });
-        send({ type: "start_game" });
-      }
-    });
+    openSocket(set, get, code, playerId);
   },
 
   reconnect: () => {
@@ -227,6 +223,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   startGame: () => send({ type: "start_game" }),
+  addBot: () => send({ type: "add_bot" }),
   addBots: () => send({ type: "add_bots" }),
   placeBid: (value) => send({ type: "place_bid", value }),
   playCard: (card) => send({ type: "play_card", card }),
