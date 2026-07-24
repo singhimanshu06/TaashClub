@@ -1,0 +1,29 @@
+# flyctl launch added from .gitignore
+# Python
+**/backend/.venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+
+# Node
+**/frontend/node_modules
+**/frontend/dist
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Env
+**/.env
+**/.env.*
+
+# flyctl launch added from .idea/.gitignore
+# Default ignored files
+.idea/shelf
+.idea/workspace.xml
+
+# flyctl launch added from backend/.pytest_cache/.gitignore
+# Created by pytest automatically.
+backend/.pytest_cache/**/*
+fly.toml

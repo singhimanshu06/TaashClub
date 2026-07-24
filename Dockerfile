@@ -28,8 +28,8 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 # They live in frontend/public/cards/ and Vite copies public/ into dist/ at build time.
 # Nothing extra needed — already included via `npm run build` above.
 
-# Railway injects PORT; default to 8000 for local docker runs
-ENV PORT=8000
+# Fly.io / local docker: default to 8080 (Fly's conventional port)
+ENV PORT=8080
 
 EXPOSE $PORT
 
