@@ -83,15 +83,14 @@ function PlayPanel({
     : [];
   const hasPass = legalActions.some((a) => a.action === "pass");
   const bombLeads = legalActions.filter((a) => a.action === "bomb") as Array<Record<string, unknown>>;
+  const canBareBomb = bombLeads.some((b) => !Array.isArray(b.lead) || (b.lead as CardT[]).length === 0);
 
   // Selected cards — must all share one rank.
   const selectedCards = myHand.filter((c) => selected.has(cardKey(c)));
   const selectedRank = selectedCards.length ? selectedCards[0].rank : null;
   const comboSize = selectedCards.length;
 
-  // Legal combos are identified by RANK + SIZE (suit is irrelevant in President).
-  // The backend returns one representative card per combo, but any card of the
-  // same rank is equally legal — so we track legal (rank, size) pairs.
+  // Legal play_combo combos by RANK + SIZE (suit is irrelevant in President).
   const legalCombos = new Set<string>();
   for (const a of legalActions) {
     if (a.action === "play_combo" && Array.isArray(a.cards)) {
@@ -101,11 +100,30 @@ function PlayPanel({
       }
     }
   }
+  // Legal bomb lead combos by RANK + SIZE (same idea, separate set).
+  const legalBombLeads = new Set<string>();
+  for (const b of bombLeads) {
+    const lead = b.lead as CardT[] | undefined;
+    if (Array.isArray(lead) && lead.length > 0) {
+      legalBombLeads.add(`${lead[0].rank}-${lead.length}`);
+    }
+  }
+
   const selectionIsLegal =
     comboSize >= 1 &&
     comboSize <= 4 &&
     selectedRank !== null &&
     legalCombos.has(`${selectedRank}-${comboSize}`);
+
+  // Bomb is enabled when: the player has a 2 AND either a legal lead combo is
+  // selected, or it's a bare bomb (2 is the last card, no lead needed).
+  const bombSelectionLegal =
+    bombLeads.length > 0 &&
+    comboSize >= 1 &&
+    comboSize <= 4 &&
+    selectedRank !== null &&
+    legalBombLeads.has(`${selectedRank}-${comboSize}`);
+  const canBomb = bombSelectionLegal || (canBareBomb && comboSize === 0);
 
   function toggle(c: CardT) {
     setSelected((prev) => {
@@ -132,12 +150,13 @@ function PlayPanel({
   }
 
   function doBomb() {
-    if (!bombLeads.length) return;
-    const best = [...bombLeads].sort(
-      (a, b) =>
-        ((a.lead as CardT[])[0]?.rank ?? 99) - ((b.lead as CardT[])[0]?.rank ?? 99),
-    )[0];
-    sendAction("bomb", { lead: best.lead });
+    if (!canBomb) return;
+    // If the 2 is the player's last card, no lead is needed.
+    if (canBareBomb && comboSize === 0) {
+      sendAction("bomb", { lead: [] });
+    } else {
+      sendAction("bomb", { lead: selectedCards });
+    }
   }
 
   return (
@@ -168,14 +187,18 @@ function PlayPanel({
           >
             Pass
           </button>
-          <button
-            className="btn-secondary president-btn bomb"
-            disabled={bombLeads.length === 0}
-            onClick={doBomb}
-            title="Play a 2 to clear the pile and lead a fresh combo"
-          >
-            💣 Bomb
-          </button>
+        <button
+          className="btn-secondary president-btn bomb"
+          disabled={!canBomb}
+          onClick={doBomb}
+          title="Play a 2 to clear the pile, then lead the selected combo"
+        >
+          {canBareBomb && comboSize === 0
+            ? "💣 Bomb (finish)"
+            : comboSize > 0
+              ? `💣 Bomb + ${rankLabel(selectedRank!)}${comboSize > 1 ? ` ×${comboSize}` : ""}`
+              : "💣 Pick lead first"}
+        </button>
         </div>
       )}
     </div>
