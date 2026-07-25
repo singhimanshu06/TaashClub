@@ -1,45 +1,31 @@
-"""Pure LAKDI game engine — server-authoritative rules, no networking.
+"""Pure Callbreak game engine — server-authoritative rules, no networking.
 
 A single ``Game`` instance owns the full state for one room's match. All rule
 enforcement (dealing, bidding limits, follow-suit legality, trick resolution,
 scoring, round/game progression) lives here so it can be unit-tested in
 isolation.
+
+Implements the ``BaseGame`` protocol from ``app.game.base`` so the generic
+room/socket/bot driver can host it without Callbreak-specific branching.
 """
 from __future__ import annotations
 
 import random
 from typing import Optional
 
-from .models import (
+from ..base import (
     Card,
+    GameError,
     Phase,
     Player,
     Suit,
-    TRUMP_CYCLE,
-    Variant,
     build_deck,
     hand_sort_key,
 )
+from .models import TRUMP_CYCLE, Variant, build_round_schedule
 
 DECK_SIZE = 52
-
-
-class GameError(Exception):
-    """Raised on an illegal action; the caller surfaces the message to a client."""
-
-
-def build_round_schedule(starting_cards: int, variant: Variant) -> list[int]:
-    """Cards-per-round schedule for the whole match.
-
-    SINGLE_RUN:  starting_cards -> 1
-    DOWN_AND_UP: starting_cards -> 1, then 1 -> starting_cards (the 1-card
-                 round is played twice back-to-back at the turn).
-    """
-    down = list(range(starting_cards, 0, -1))            # [s, ..., 1]
-    if variant == Variant.SINGLE_RUN:
-        return down
-    up = list(range(1, starting_cards + 1))              # [1, ..., s]
-    return down + up
+GAME_TYPE = "callbreak"
 
 
 class Game:
@@ -55,6 +41,7 @@ class Game:
         if len(players) != num_players:
             raise GameError("player count does not match num_players")
 
+        self.game_type = GAME_TYPE
         self.num_players = num_players
         self.variant = variant
         self.players = sorted(players, key=lambda p: p.join_order)
@@ -259,6 +246,31 @@ class Game:
         self.last_trick_winner_seat = None
         self.phase = Phase.GAME_END
 
+    # ----- generic action envelope (BaseGame) ---------------------------
+    def apply_action(self, player_id: str, action: str, params: dict) -> None:
+        """Dispatch a generic action envelope to the specific rule method."""
+        if action == "place_bid":
+            self.place_bid(player_id, int(params["value"]))
+        elif action == "play_card":
+            self.play_card(player_id, Card.from_dict(params["card"]))
+        elif action == "advance_round":
+            # Cancel any pending bot auto-advance so it can't double-fire.
+            self.advance_round()
+        else:
+            raise GameError(f"unknown action: {action}")
+
+    def legal_actions(self, player_id: str) -> list[dict]:
+        """All actions the player may legally take right now, as envelopes."""
+        if self.phase not in (Phase.BIDDING, Phase.PLAYING):
+            return []
+        if self.awaiting_trick_clear:
+            return []
+        if self.players[self.turn_idx].id != player_id:
+            return []
+        if self.phase == Phase.BIDDING:
+            return [{"action": "place_bid", "value": v} for v in range(self.cards_this_round + 1)]
+        return [{"action": "play_card", "card": c.to_dict()} for c in self.legal_cards(player_id)]
+
     # ----- serialization -------------------------------------------------
     def final_standings(self) -> list[dict]:
         ranked = sorted(self.players, key=lambda p: p.total_score, reverse=True)
@@ -282,6 +294,7 @@ class Game:
             else None
         )
         return {
+            "game_type": self.game_type,
             "phase": self.phase.value,
             "num_players": self.num_players,
             "variant": self.variant.value,
@@ -321,6 +334,9 @@ class Game:
                 [c.to_dict() for c in self.legal_cards(viewer_id)]
                 if viewer_id and self.phase == Phase.PLAYING and current_player_id == viewer_id
                 else None
+            ),
+            "your_legal_actions": (
+                self.legal_actions(viewer_id) if viewer_id else None
             ),
             "last_round_result": self.last_round_result,
             "round_history": self.round_history,

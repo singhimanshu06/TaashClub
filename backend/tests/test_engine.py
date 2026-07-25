@@ -1,10 +1,11 @@
-"""Unit tests for the pure LAKDI engine."""
+"""Unit tests for the pure TaashClub engine."""
 import random
 
 import pytest
 
-from app.game.engine import Game, GameError, build_round_schedule
-from app.game.models import Card, Phase, Player, Suit, Variant, hand_sort_key
+from app.game.callbreak.engine import Game, GameError, build_round_schedule
+from app.game.base import Card, Phase, Player, Suit, hand_sort_key
+from app.game.callbreak.models import Variant
 
 
 def make_players(n: int) -> list[Player]:

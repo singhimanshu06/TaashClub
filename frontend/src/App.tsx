@@ -20,7 +20,7 @@ export default function App() {
   // On first load, check for a saved session and attempt reconnection instead
   // of showing Home. This handles refresh, phone-sleep, power-button, etc.
   useEffect(() => {
-    const saved = localStorage.getItem("lakdi_session");
+    const saved = localStorage.getItem("taashclub_session");
     if (saved) reconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

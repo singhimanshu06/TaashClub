@@ -1,6 +1,6 @@
 export type Suit = "S" | "H" | "C" | "D";
 export type Variant = "single_run" | "down_and_up";
-export type Phase = "lobby" | "bidding" | "playing" | "round_end" | "game_end";
+export type Phase = "lobby" | "bidding" | "playing" | "exchange" | "round_end" | "game_end";
 
 export interface CardT {
   suit: Suit;
@@ -17,8 +17,10 @@ export interface LobbyPlayer {
 
 export interface Lobby {
   code: string;
+  game_type: string;
+  game_name: string;
   num_players: number;
-  variant: Variant;
+  options: Record<string, unknown>;
   host_id: string | null;
   started: boolean;
   players: LobbyPlayer[];
@@ -45,10 +47,16 @@ export interface TrickCard {
 export interface RoundResultRow {
   player_id: string;
   name: string;
-  bid: number;
-  tricks_won: number;
-  points: number;
-  hit: boolean;
+  // Callbreak fields:
+  bid?: number;
+  tricks_won?: number;
+  points?: number;
+  hit?: boolean;
+  // President fields:
+  finish?: number;
+  role?: string;
+  round_score?: number;
+  total_score?: number;
 }
 
 export interface RoundHistoryEntry {
@@ -66,11 +74,13 @@ export interface Standing {
 }
 
 export interface GameState {
+  game_type: string;
   phase: Phase;
   num_players: number;
-  variant: Variant;
+  variant?: Variant;
+  rounds_total?: number;
   round_index: number;
-  total_rounds: number;
+  total_rounds?: number;
   cards_this_round: number | null;
   trump: Suit | null;
   starter_id: string | null;
@@ -81,9 +91,21 @@ export interface GameState {
   current_trick: TrickCard[];
   players: StatePlayer[];
   your_legal_cards: CardT[] | null;
+  your_legal_actions: unknown[] | null;
   last_round_result: RoundResultRow[] | null;
   round_history: RoundHistoryEntry[];
   final_standings: Standing[] | null;
+  // President-specific (optional; absent for Callbreak):
+  pile_top?: { rank: number; size: number; player_id: string } | null;
+  roles?: Record<string, string>;
+  exchange?: {
+    step: string;
+    giver_id: string | null;
+    receiver_id: string | null;
+    count: number;
+  } | null;
+  finish_order?: string[];
+  skipped_player_ids?: string[];
 }
 
 export interface ChatMessage {
@@ -91,4 +113,20 @@ export interface ChatMessage {
   name: string;
   text: string;
   ts: number;
+}
+
+export interface OptionSchema {
+  type: string;
+  values?: string[];
+  default?: string;
+  labels?: Record<string, string>;
+}
+
+export interface GameInfo {
+  game_type: string;
+  display_name: string;
+  description: string;
+  min_players: number;
+  max_players: number;
+  options_schema: Record<string, OptionSchema>;
 }

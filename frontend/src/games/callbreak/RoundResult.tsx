@@ -1,13 +1,18 @@
 import { useShallow } from "zustand/react/shallow";
-import { useStore } from "../store";
-import type { GameState } from "../types";
-import { suitSymbol } from "./PlayingCard";
+import { useStore } from "../../store";
+import type { GameState } from "../../types";
+import { suitSymbol } from "../../components/PlayingCard";
 
-export default function RoundResult({ game }: { game: GameState }) {
-  const { playerId, advanceRound, isHost } = useStore(
+export default function CallbreakRoundResult({
+  game,
+  sendAction,
+}: {
+  game: GameState;
+  sendAction: (action: string, params?: Record<string, unknown>) => void;
+}) {
+  const { playerId, isHost } = useStore(
     useShallow((s) => ({
       playerId: s.playerId,
-      advanceRound: s.advanceRound,
       isHost: s.lobby?.host_id === s.playerId,
     }))
   );
@@ -43,7 +48,7 @@ export default function RoundResult({ game }: { game: GameState }) {
           </tbody>
         </table>
         {isHost ? (
-          <button className="btn-primary" onClick={advanceRound}>
+          <button className="btn-primary" onClick={() => sendAction("advance_round")}>
             Next round
           </button>
         ) : (

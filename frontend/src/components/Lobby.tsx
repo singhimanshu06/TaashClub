@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
-import type { Variant } from "../types";
 
-const VARIANT_LABEL: Record<Variant, string> = {
+const VARIANT_LABEL: Record<string, string> = {
   single_run: "Single run",
   down_and_up: "Down & up",
 };
@@ -88,7 +87,8 @@ export default function Lobby() {
           <strong>{lobby.code}</strong>
         </div>
         <p className="lobby-meta">
-          {lobby.num_players} players · {VARIANT_LABEL[lobby.variant]} ·{" "}
+          {lobby.game_name} · {lobby.num_players} players
+          {lobby.options.variant ? ` · ${VARIANT_LABEL[lobby.options.variant as string] ?? lobby.options.variant}` : ""} ·{" "}
           <span className={connected ? "dot-ok" : "dot-bad"}>{connected ? "connected" : "offline"}</span>
         </p>
 

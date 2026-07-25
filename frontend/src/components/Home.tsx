@@ -1,43 +1,114 @@
-import { useState } from "react";
-import { createRoom, joinRoom } from "../api";
+import { useEffect, useState } from "react";
+import { createRoom, fetchGames, joinRoom } from "../api";
 import { useStore } from "../store";
-import type { Variant } from "../types";
+import type { GameInfo } from "../types";
+import { getGameSlots } from "../games/registry";
+import { RULES as CALLBREAK_RULES } from "../games/callbreak";
+import { RULES as PRESIDENT_RULES } from "../games/president";
 
 function roomFromUrl(): string {
   return new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
 }
 
-const RULES = [
-  "4–6 players. Hand size shrinks each round down to 1 card (Single run) or down-and-up.",
-  "Each round, bid the EXACT number of tricks you'll win. Hit it → 10 + bid points; miss (over or under) → 0.",
-  "Trump cycles every round: Spades → Hearts → Clubs → Diamonds.",
-  "Follow the led suit if you can; otherwise play any card. Highest trump wins, else highest of the led suit.",
-  "First bidder rotates each round. Final scoreboard revealed only at game end.",
-];
+// Per-game-type rules text for the info popup. A game may export its RULES from
+// its slot package; fall back to the description from the registry.
+function rulesFor(info: GameInfo): string[] {
+  if (info.game_type === "callbreak") return CALLBREAK_RULES;
+  if (info.game_type === "president") return PRESIDENT_RULES;
+  return [info.description];
+}
+
+interface GridSlot {
+  game_type?: string;
+  display_name: string;
+  description: string;
+  available: boolean;
+  info?: GameInfo;
+}
+
+const GRID_SIZE = 4;
+
+function buildGrid(games: GameInfo[]): GridSlot[] {
+  const slots: GridSlot[] = games.map((g) => ({
+    game_type: g.game_type,
+    display_name: g.display_name,
+    description: g.description,
+    available: true,
+    info: g,
+  }));
+  while (slots.length < GRID_SIZE) {
+    slots.push({ display_name: "Coming soon", description: "Stay tuned!", available: false });
+  }
+  return slots.slice(0, GRID_SIZE);
+}
+
+type Step = "pick" | "setup";
+type SetupMode = "create" | "join";
 
 export default function Home() {
   const enterRoom = useStore((s) => s.enterRoom);
   const initialRoom = roomFromUrl();
-  const [mode, setMode] = useState<"create" | "join">(initialRoom ? "join" : "create");
+
+  // Two-step flow: "pick" (game grid) -> "setup" (name + params + create/join).
+  const [step, setStep] = useState<Step>(initialRoom ? "setup" : "pick");
+  const [setupMode, setSetupMode] = useState<SetupMode>(initialRoom ? "join" : "create");
+
   const [name, setName] = useState("");
   const [code, setCode] = useState(initialRoom);
+  const [games, setGames] = useState<GameInfo[] | null>(null);
+  const [gameType, setGameType] = useState<string>("");
   const [numPlayers, setNumPlayers] = useState(4);
-  const [variant, setVariant] = useState<Variant>("single_run");
+  const [options, setOptions] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showRules, setShowRules] = useState(false);
+  const [rulesForInfo, setRulesForInfo] = useState<GameInfo | null>(null);
 
-  const startCardsFor = (n: number) => Math.floor(52 / n);
+  useEffect(() => {
+    fetchGames()
+      .then((list) => setGames(list))
+      .catch(() => {
+        setGames([]);
+        setErr("Couldn't reach the server. Is the backend running on port 8000?");
+      });
+  }, []);
+
+  const selectedGame = games?.find((g) => g.game_type === gameType) ?? null;
+  const HomeOptions = selectedGame ? getGameSlots(gameType).HomeOptions : undefined;
+
+  function pickGame(info: GameInfo) {
+    setGameType(info.game_type);
+    setNumPlayers(info.min_players);
+    const defs: Record<string, unknown> = {};
+    for (const [key, schema] of Object.entries(info.options_schema)) {
+      if (schema.default !== undefined) defs[key] = schema.default;
+    }
+    setOptions(defs);
+    setSetupMode("create");
+    setStep("setup");
+    setErr(null);
+  }
+
+  function backToPick() {
+    setStep("pick");
+    setErr(null);
+  }
+
+  function gotoJoin() {
+    setSetupMode("join");
+    setStep("setup");
+    setErr(null);
+  }
 
   async function handleSubmit() {
     setErr(null);
     if (!name.trim()) return setErr("Please enter your name.");
-    if (mode === "join" && !code.trim()) return setErr("Please enter a room code.");
+    if (setupMode === "join" && !code.trim()) return setErr("Please enter a room code.");
+    if (setupMode === "create" && !gameType) return setErr("Please pick a game first.");
     setBusy(true);
     try {
       let roomCode = code.trim().toUpperCase();
-      if (mode === "create") {
-        roomCode = (await createRoom(numPlayers, variant)).code;
+      if (setupMode === "create") {
+        roomCode = (await createRoom(gameType, numPlayers, options)).code;
       }
       const joined = await joinRoom(roomCode, name.trim());
       enterRoom(joined.code, joined.player_id);
@@ -48,30 +119,104 @@ export default function Home() {
     }
   }
 
+  // ----- Rules modal -----
+  function showRules(info: GameInfo) {
+    setRulesForInfo(info);
+  }
+
+  // ===================== Step 1: Game picker =====================
+  if (step === "pick") {
+    const gridSlots = games ? buildGrid(games) : null;
+    return (
+      <div className="screen home-screen">
+        <div className="home-card">
+          <h1 className="logo">
+            <span className="logo-tc">TC</span>
+            <span className="logo-text">TaashClub</span>
+          </h1>
+
+          <p className="tagline">Pick a game to play</p>
+
+          {/* 2x2 game grid */}
+          <div className="game-grid">
+            {gridSlots ? (
+              gridSlots.map((slot, i) => (
+                <div key={slot.game_type ?? `placeholder-${i}`} className="game-card-wrap">
+                  <button
+                    className={`game-card${slot.available ? "" : " disabled"}`}
+                    onClick={() => slot.available && slot.info && pickGame(slot.info)}
+                    disabled={!slot.available}
+                  >
+                    <span className="game-card-name">{slot.display_name}</span>
+                    <span className="game-card-desc">{slot.description}</span>
+                    {!slot.available && <span className="game-card-badge">Soon</span>}
+                  </button>
+                  {slot.available && slot.info && (
+                    <button
+                      className="game-card-info"
+                      onClick={() => showRules(slot.info!)}
+                      title="How to play"
+                    >
+                      i
+                    </button>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="game-grid-loading">
+                <div className="spinner" />
+                <p>Loading games…</p>
+              </div>
+            )}
+          </div>
+
+          <button className="btn-link" onClick={gotoJoin}>
+            Join with code →
+          </button>
+
+          {err && <div className="inline-error">{err}</div>}
+        </div>
+
+        {rulesForInfo && (
+          <RulesModal info={rulesForInfo} onClose={() => setRulesForInfo(null)} />
+        )}
+      </div>
+    );
+  }
+
+  // ===================== Step 2: Setup =====================
   return (
     <div className="screen home-screen">
       <div className="home-card">
-        <h1 className="logo">
-          LAKDI <span className="logo-suits">♠♥♣♦</span>
-          <button className="info-btn" onClick={() => setShowRules((v) => !v)} title="How to play">
-            i
+        <div className="setup-header">
+          <button className="btn-back" onClick={backToPick} title="Back to games">
+            ←
           </button>
-        </h1>
-        {showRules && (
-          <div className="rules-popup">
-            <ul className="rules-list">
-              {RULES.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+          {selectedGame && (
+            <h2 className="setup-title">
+              {selectedGame.display_name}
+              <button
+                className="info-btn"
+                onClick={() => selectedGame && showRules(selectedGame)}
+                title="How to play"
+              >
+                i
+              </button>
+            </h2>
+          )}
+        </div>
 
         <div className="segmented">
-          <button className={mode === "create" ? "seg active" : "seg"} onClick={() => setMode("create")}>
+          <button
+            className={setupMode === "create" ? "seg active" : "seg"}
+            onClick={() => setSetupMode("create")}
+          >
             Create Room
           </button>
-          <button className={mode === "join" ? "seg active" : "seg"} onClick={() => setMode("join")}>
+          <button
+            className={setupMode === "join" ? "seg active" : "seg"}
+            onClick={() => setSetupMode("join")}
+          >
             Join Room
           </button>
         </div>
@@ -86,7 +231,7 @@ export default function Home() {
           />
         </label>
 
-        {mode === "join" ? (
+        {setupMode === "join" ? (
           <label className="field">
             <span>Room code</span>
             <input
@@ -97,48 +242,44 @@ export default function Home() {
             />
           </label>
         ) : (
-          <>
-            <div className="field">
-              <span>Players</span>
-              <div className="chip-row">
-                {[4, 5, 6].map((n) => (
-                  <button
-                    key={n}
-                    className={numPlayers === n ? "chip active" : "chip"}
-                    onClick={() => setNumPlayers(n)}
-                  >
-                    {n}
-                    <small>{startCardsFor(n)} cards</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <span>Game length</span>
-              <div className="chip-row">
-                <button
-                  className={variant === "single_run" ? "chip wide active" : "chip wide"}
-                  onClick={() => setVariant("single_run")}
-                >
-                  Single run
-                  <small>{startCardsFor(numPlayers)} → 1</small>
-                </button>
-                <button
-                  className={variant === "down_and_up" ? "chip wide active" : "chip wide"}
-                  onClick={() => setVariant("down_and_up")}
-                >
-                  Down &amp; up
-                  <small>{startCardsFor(numPlayers)} → 1 → {startCardsFor(numPlayers)}</small>
-                </button>
-              </div>
-            </div>
-          </>
+          selectedGame && HomeOptions && (
+            <HomeOptions
+              info={selectedGame}
+              numPlayers={numPlayers}
+              setNumPlayers={setNumPlayers}
+              options={options}
+              setOptions={setOptions}
+            />
+          )
         )}
 
         {err && <div className="inline-error">{err}</div>}
 
         <button className="btn-primary" disabled={busy} onClick={handleSubmit}>
-          {busy ? "Please wait…" : mode === "join" ? "Join Game" : "Create & Join"}
+          {busy ? "Please wait…" : setupMode === "join" ? "Join Game" : "Create & Join"}
+        </button>
+      </div>
+
+      {rulesForInfo && (
+        <RulesModal info={rulesForInfo} onClose={() => setRulesForInfo(null)} />
+      )}
+    </div>
+  );
+}
+
+/** Full-screen rules overlay (reuses .modal-backdrop / .modal styles). */
+function RulesModal({ info, onClose }: { info: GameInfo; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal rules-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>How to play — {info.display_name}</h2>
+        <ul className="rules-list">
+          {rulesFor(info).map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+        <button className="btn-primary" onClick={onClose}>
+          Got it
         </button>
       </div>
     </div>

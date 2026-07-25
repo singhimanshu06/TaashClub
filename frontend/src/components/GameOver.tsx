@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { GameState } from "../types";
-import DetailedScores from "./DetailedScores";
+import { getGameSlots } from "../games/registry";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
 
@@ -13,8 +13,9 @@ export default function GameOver({ game }: { game: GameState }) {
   const [showDetailed, setShowDetailed] = useState(false);
   const standings = game.final_standings ?? [];
   const winner = standings[0];
+  const DetailedScores = getGameSlots(game.game_type).DetailedScores;
 
-  if (showDetailed) {
+  if (showDetailed && DetailedScores) {
     return <DetailedScores game={game} playerId={playerId!} onBack={() => setShowDetailed(false)} />;
   }
 
@@ -46,9 +47,11 @@ export default function GameOver({ game }: { game: GameState }) {
           </table>
         </div>
 
-        <button className="btn-primary" onClick={() => setShowDetailed(true)}>
-          Detailed scores
-        </button>
+        {DetailedScores && (
+          <button className="btn-primary" onClick={() => setShowDetailed(true)}>
+            Detailed scores
+          </button>
+        )}
         <button className="btn-primary" onClick={reset}>
           Back to Home
         </button>

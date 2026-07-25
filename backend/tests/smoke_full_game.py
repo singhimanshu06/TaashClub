@@ -10,7 +10,7 @@ import urllib.request
 
 import websockets
 
-PORT = os.environ.get("LAKDI_PORT", "8000")
+PORT = os.environ.get("TAASHCLUB_PORT", "8000")
 BASE = f"http://127.0.0.1:{PORT}"
 WS = f"ws://127.0.0.1:{PORT}"
 
@@ -23,7 +23,7 @@ def post(path, body):
 
 
 async def main():
-    code = post("/rooms", {"num_players": 4, "variant": "single_run"})["code"]
+    code = post("/rooms", {"game_type": "callbreak", "num_players": 4, "options": {"variant": "single_run"}})["code"]
     players = [post(f"/rooms/{code}/join", {"name": n})["player_id"]
                for n in ["Alice", "Bob", "Cara", "Dan"]]
     idx = {pid: i for i, pid in enumerate(players)}
@@ -77,15 +77,15 @@ async def main():
 
         cur = s["current_player_id"]
         if phase == "bidding" and cur:
-            await send(idx[cur], {"type": "place_bid", "value": 1})
+            await send(idx[cur], {"type": "action", "action": "place_bid", "params": {"value": 1}})
         elif phase == "playing" and cur:
             me = latest[cur]
             legal = me["your_legal_cards"]
             if legal:
-                await send(idx[cur], {"type": "play_card", "card": legal[0]})
+                await send(idx[cur], {"type": "action", "action": "play_card", "params": {"card": legal[0]}})
         elif phase == "round_end":
             rounds_done += 1
-            await send(0, {"type": "advance_round"})
+            await send(0, {"type": "action", "action": "advance_round"})
         await asyncio.sleep(0.03)
 
     for t in tasks:
