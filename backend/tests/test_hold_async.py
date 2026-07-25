@@ -5,11 +5,12 @@ import asyncio
 
 import app.main as main
 from app.game.room import Room
-from app.game.models import Variant
+from app.game.callbreak.models import Variant
 
 
 def _started_room() -> Room:
-    room = Room(code="TEST", num_players=4, variant=Variant.SINGLE_RUN)
+    room = Room(code="TEST", game_type="callbreak", num_players=4,
+                options={"variant": Variant.SINGLE_RUN.value})
     for n in ["A", "B", "C", "D"]:
         room.add_player(n)
     room.start_game(room.host_id)
@@ -26,13 +27,13 @@ async def _play_full_game(room: Room):
             continue
         if g.phase.value == "bidding":
             pid = g.players[g.turn_idx].id
-            await main.handle_event(room, pid, {"type": "place_bid", "value": 0})
+            await main.handle_event(room, pid, {"type": "action", "action": "place_bid", "params": {"value": 0}})
         elif g.phase.value == "playing":
             pid = g.players[g.turn_idx].id
             card = g.legal_cards(pid)[0].to_dict()
-            await main.handle_event(room, pid, {"type": "play_card", "card": card})
+            await main.handle_event(room, pid, {"type": "action", "action": "play_card", "params": {"card": card}})
         elif g.phase.value == "round_end":
-            await main.handle_event(room, room.host_id, {"type": "advance_round"})
+            await main.handle_event(room, room.host_id, {"type": "action", "action": "advance_round"})
     return g
 
 
@@ -58,12 +59,13 @@ def test_clearing_guard_resets_after_each_trick():
         # bid out
         while g.phase.value == "bidding":
             await main.handle_event(room, g.players[g.turn_idx].id,
-                                    {"type": "place_bid", "value": 1})
+                                    {"type": "action", "action": "place_bid", "params": {"value": 1}})
         # play the first full trick
         for _ in range(4):
             pid = g.players[g.turn_idx].id
             await main.handle_event(room, pid,
-                                    {"type": "play_card", "card": g.legal_cards(pid)[0].to_dict()})
+                                    {"type": "action", "action": "play_card",
+                                     "params": {"card": g.legal_cards(pid)[0].to_dict()}})
         assert g.awaiting_trick_clear and room.clearing        # held + guarded
         await asyncio.sleep(0.02)                              # let hold task run
         assert not g.awaiting_trick_clear and not room.clearing  # cleared + released

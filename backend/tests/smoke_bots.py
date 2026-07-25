@@ -7,7 +7,7 @@ proving the bot driver correctly interleaves with a participating human across a
 full match to game_end.
 
 Usage: start the server, then `python tests/smoke_bots.py`.
-Set LAKDI_TRICK_HOLD=0 and a small LAKDI_BOT_AUTO_ADVANCE to run it fast.
+Set TAASHCLUB_TRICK_HOLD=0 and a small TAASHCLUB_BOT_AUTO_ADVANCE to run it fast.
 """
 import asyncio
 import json
@@ -16,7 +16,7 @@ import urllib.request
 
 import websockets
 
-PORT = os.environ.get("LAKDI_PORT", "8000")
+PORT = os.environ.get("TAASHCLUB_PORT", "8000")
 BASE = f"http://127.0.0.1:{PORT}"
 WS = f"ws://127.0.0.1:{PORT}"
 
@@ -29,7 +29,7 @@ def post(path, body):
 
 
 async def main():
-    code = post("/rooms", {"num_players": 4, "variant": "single_run"})["code"]
+    code = post("/rooms", {"game_type": "callbreak", "num_players": 4, "options": {"variant": "single_run"}})["code"]
     human = post(f"/rooms/{code}/join", {"name": "Human"})["player_id"]
 
     ws = await websockets.connect(f"{WS}/ws/{code}?player_id={human}")
@@ -80,11 +80,11 @@ async def main():
 
         cur = s.get("current_player_id")
         if phase == "bidding" and cur == human:
-            await ws.send(json.dumps({"type": "place_bid", "value": 1}))
+            await ws.send(json.dumps({"type": "action", "action": "place_bid", "params": {"value": 1}}))
         elif phase == "playing" and cur == human and not s.get("awaiting_trick_clear"):
             legal = s.get("your_legal_cards")
             if legal:
-                await ws.send(json.dumps({"type": "play_card", "card": legal[0]}))
+                await ws.send(json.dumps({"type": "action", "action": "play_card", "params": {"card": legal[0]}}))
         elif phase == "round_end":
             rounds_done.add(s.get("round_index"))
         await asyncio.sleep(0.03)

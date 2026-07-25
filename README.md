@@ -1,4 +1,4 @@
-# LAKDI — Callbreak (decreasing-cards, exact-bid variant)
+# TaashClub — Callbreak (decreasing-cards, exact-bid variant)
 
 A real-time multiplayer web game. A Callbreak variant where the hand size shrinks
 each round, players bid the **exact** number of tricks they'll win, and the trump
@@ -40,9 +40,9 @@ Bot behavior:
 
 Bot timing is tunable via env vars (defaults shown):
 ```
-LAKDI_BOT_THINK_MIN=0.6      # min "thinking" delay per bot action (seconds)
-LAKDI_BOT_THINK_MAX=1.2      # max delay
-LAKDI_BOT_AUTO_ADVANCE=6     # ROUND_END auto-advance grace period
+TAASHCLUB_BOT_THINK_MIN=0.6      # min "thinking" delay per bot action (seconds)
+TAASHCLUB_BOT_THINK_MAX=1.2      # max delay
+TAASHCLUB_BOT_AUTO_ADVANCE=6     # ROUND_END auto-advance grace period
 ```
 
 ## Run it
@@ -111,8 +111,8 @@ cd backend
 .venv/bin/python tests/smoke_bots.py          # 1 human + 3 bots full game (server must be running)
 ```
 
-For fast smoke runs set `LAKDI_TRICK_HOLD=0 LAKDI_BOT_THINK_MIN=0.01
-LAKDI_BOT_THINK_MAX=0.05 LAKDI_BOT_AUTO_ADVANCE=0.3` (and `LAKDI_PORT=8123` if
+For fast smoke runs set `TAASHCLUB_TRICK_HOLD=0 TAASHCLUB_BOT_THINK_MIN=0.01
+TAASHCLUB_BOT_THINK_MAX=0.05 TAASHCLUB_BOT_AUTO_ADVANCE=0.3` (and `TAASHCLUB_PORT=8123` if
 the server isn't on the default 8000).
 
 ## Architecture

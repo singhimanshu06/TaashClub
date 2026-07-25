@@ -9,9 +9,11 @@ import random
 
 import pytest
 
-from app.game.bot import BOT_NAMES, bot_bid, bot_play, random_bot_name
-from app.game.engine import Game
-from app.game.models import Card, Phase, Player, Suit, Variant
+from app.game.names import BOT_NAMES, random_bot_name
+from app.game.callbreak.bot import bot_bid, bot_play
+from app.game.callbreak.engine import Game
+from app.game.base import Card, Phase, Player, Suit
+from app.game.callbreak.models import Variant
 
 
 def make_players(n: int, bot_seats: set[int] = frozenset()) -> list[Player]:

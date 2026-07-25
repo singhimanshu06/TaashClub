@@ -9,36 +9,36 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .game.engine import GameError
-from .game.models import Card, Phase
+from .game.base import GameError, Phase
 from .game.room import ConnectionManager, RoomManager, Room
-from .game.bot import bot_bid, bot_play
+from .game.registry import get_game_spec, list_games
 from .protocol import (
     CreateRoomRequest,
     CreateRoomResponse,
+    GameInfo,
     JoinRoomRequest,
     JoinRoomResponse,
 )
 
 # How long a completed trick stays on the table before it clears. Override with
-# LAKDI_TRICK_HOLD (e.g. 0 in automated tests).
-TRICK_HOLD_SECONDS = float(os.environ.get("LAKDI_TRICK_HOLD", "3"))
+# TAASHCLUB_TRICK_HOLD (e.g. 0 in automated tests).
+TRICK_HOLD_SECONDS = float(os.environ.get("TAASHCLUB_TRICK_HOLD", "3"))
 # Bot "thinking" delay range (seconds). Jittered per action for a human feel.
-BOT_THINK_MIN = float(os.environ.get("LAKDI_BOT_THINK_MIN", "0.6"))
-BOT_THINK_MAX = float(os.environ.get("LAKDI_BOT_THINK_MAX", "1.2"))
+BOT_THINK_MIN = float(os.environ.get("TAASHCLUB_BOT_THINK_MIN", "0.6"))
+BOT_THINK_MAX = float(os.environ.get("TAASHCLUB_BOT_THINK_MAX", "1.2"))
 # How long a bot game waits in ROUND_END before auto-advancing. Set high enough
 # for a human to read the scoreboard, low enough to keep the game moving. 0
 # disables auto-advance (the human must always click).
-BOT_AUTO_ADVANCE_SECONDS = float(os.environ.get("LAKDI_BOT_AUTO_ADVANCE", "6"))
+BOT_AUTO_ADVANCE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_AUTO_ADVANCE", "6"))
 # How long to wait after a player disconnects before converting their seat to a
 # bot (so the game continues for everyone else). If they reconnect before this
 # fires, the conversion is cancelled.
-BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("LAKDI_BOT_CONVERSION_GRACE", "30"))
+BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_CONVERSION_GRACE", "30"))
 
-app = FastAPI(title="LAKDI")
+app = FastAPI(title="TaashClub")
 
-# In production set ALLOWED_ORIGINS to your Railway domain, e.g.:
-#   ALLOWED_ORIGINS=https://lakdi.up.railway.app
+# In production set ALLOWED_ORIGINS to your deployment domain, e.g.:
+#   ALLOWED_ORIGINS=https://taashclub.fly.dev
 # Leave unset (or "*") for local dev.
 _raw_origins = os.environ.get("ALLOWED_ORIGINS", "*")
 _origins = [o.strip() for o in _raw_origins.split(",")] if _raw_origins != "*" else ["*"]
@@ -54,10 +54,15 @@ rooms = RoomManager()
 connections = ConnectionManager()
 
 
+@app.get("/games", response_model=list[GameInfo])
+def games():
+    return list_games()
+
+
 @app.post("/rooms", response_model=CreateRoomResponse)
 def create_room(req: CreateRoomRequest):
     try:
-        room = rooms.create_room(req.num_players, req.variant)
+        room = rooms.create_room(req.game_type, req.num_players, req.options)
     except GameError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CreateRoomResponse(code=room.code)
@@ -137,14 +142,16 @@ async def handle_event(room: Room, player_id: str, msg: dict) -> None:
             room.add_one_bot(player_id)
         elif event == "add_bots":
             room.add_bots(player_id)
-        elif event == "place_bid":
-            _require_game(room).place_bid(player_id, int(msg["value"]))
-        elif event == "play_card":
-            _require_game(room).play_card(player_id, Card.from_dict(msg["card"]))
-        elif event == "advance_round":
-            # Cancel any pending bot auto-advance so it can't double-fire.
+        elif event == "action":
+            # Generic in-game action envelope: {"type":"action","action":<name>,"params":{...}}
+            # The engine owns all game-specific dispatch (place_bid, play_card,
+            # advance_round, ...). Adding a new game needs no changes here.
+            # A human action supersedes any pending bot auto-advance.
             _cancel_auto_advance(room)
-            _require_game(room).advance_round()
+            game = _require_game(room)
+            action = msg["action"]
+            params = msg.get("params") or {}
+            game.apply_action(player_id, action, params)
         else:
             await connections.send_to(room, player_id,
                                       {"type": "error", "message": f"unknown event: {event}"})
@@ -181,7 +188,7 @@ async def _after_state_change(room: Room) -> None:
     # If it's a bot's turn to act, schedule its "think then act" task (one at a
     # time per room — bot_busy guards against duplicate scheduling). The task
     # ref is kept in room._bot_tasks so it isn't GC'd before it completes.
-    if game.phase in (Phase.BIDDING, Phase.PLAYING) and not room.bot_busy:
+    if game.phase in (Phase.BIDDING, Phase.PLAYING, Phase.EXCHANGE) and not room.bot_busy:
         current = game.players[game.turn_idx]
         if current.is_bot:
             room.bot_busy = True
@@ -214,12 +221,14 @@ async def _hold_and_clear_trick(room: Room) -> None:
 
 
 async def _bot_act(room: Room, player_id: str) -> None:
-    """Think for a short jittered delay, then apply one bot action (bid or
-    play) directly to the engine and re-enter the post-state-change loop.
+    """Think for a short jittered delay, then apply one bot action directly to
+    the engine and re-enter the post-state-change loop.
 
-    The ``bot_busy`` guard is released *synchronously* before re-entering the
-    loop (no await gap), so the loop can schedule the next bot immediately.
-    It is NOT cleared in a ``finally`` — doing so would clobber the guard that
+    The bot brain (looked up from the room's game spec) decides which action is
+    needed — the driver never branches on game-specific phases. The
+    ``bot_busy`` guard is released *synchronously* before re-entering the loop
+    (no await gap), so the loop can schedule the next bot immediately. It is
+    NOT cleared in a ``finally`` — doing so would clobber the guard that
     ``_after_state_change`` just set for the next bot and drop that task's only
     reference, letting the loop GC it mid-flight. On sleep cancellation we
     release explicitly so the room doesn't deadlock.
@@ -239,11 +248,10 @@ async def _bot_act(room: Room, player_id: str) -> None:
     current = game.players[game.turn_idx]
     if current.id != player_id or not current.is_bot:
         return
-    if game.phase == Phase.BIDDING:
-        game.place_bid(player_id, bot_bid(game, player_id, random.Random()))
-    elif game.phase == Phase.PLAYING and not game.awaiting_trick_clear:
-        card = bot_play(game, player_id, random.Random())
-        game.play_card(player_id, card)
+    if game.phase in (Phase.BIDDING, Phase.PLAYING, Phase.EXCHANGE) and not game.awaiting_trick_clear:
+        brain = room.spec.bot_brain
+        action, params = brain.decide_action(game, player_id, random.Random())
+        game.apply_action(player_id, action, params)
     else:
         return
     await _after_state_change(room)

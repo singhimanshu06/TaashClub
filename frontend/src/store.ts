@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { WS_BASE } from "./api";
-import type { CardT, ChatMessage, GameState, Lobby } from "./types";
+import type { ChatMessage, GameState, Lobby } from "./types";
 
 type Screen = "home" | "lobby" | "game" | "reconnecting";
 
-const SESSION_KEY = "lakdi_session";
+const SESSION_KEY = "taashclub_session";
 const MAX_RECONNECT_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 1000; // 1s, 2s, 4s, 8s, 16s
 
@@ -30,9 +30,7 @@ interface Store {
   startGame: () => void;
   addBot: () => void;
   addBots: () => void;
-  placeBid: (value: number) => void;
-  playCard: (card: CardT) => void;
-  advanceRound: () => void;
+  sendAction: (action: string, params?: Record<string, unknown>) => void;
   sendChat: (text: string) => void;
   clearError: () => void;
   reset: () => void;
@@ -225,9 +223,7 @@ export const useStore = create<Store>((set, get) => ({
   startGame: () => send({ type: "start_game" }),
   addBot: () => send({ type: "add_bot" }),
   addBots: () => send({ type: "add_bots" }),
-  placeBid: (value) => send({ type: "place_bid", value }),
-  playCard: (card) => send({ type: "play_card", card }),
-  advanceRound: () => send({ type: "advance_round" }),
+  sendAction: (action, params = {}) => send({ type: "action", action, params }),
   sendChat: (text) => {
     const t = text.trim();
     if (t) send({ type: "chat", text: t });

@@ -20,7 +20,7 @@ def post(path, body):
 
 
 async def main():
-    code = post("/rooms", {"num_players": 4, "variant": "single_run"})["code"]
+    code = post("/rooms", {"game_type": "callbreak", "num_players": 4, "options": {"variant": "single_run"}})["code"]
     print("room:", code)
     players = [post(f"/rooms/{code}/join", {"name": n}) for n in ["Alice", "Bob", "Cara", "Dan"]]
 

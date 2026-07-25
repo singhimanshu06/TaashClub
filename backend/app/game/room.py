@@ -9,9 +9,9 @@ from typing import Optional
 
 from fastapi import WebSocket
 
-from .bot import random_bot_name
-from .engine import Game, GameError
-from .models import Player, Variant
+from .base import BaseGame, GameError, Player
+from .names import random_bot_name
+from .registry import GameSpec, get_game_spec
 
 CODE_ALPHABET = string.ascii_uppercase + string.digits
 CODE_LEN = 4
@@ -26,11 +26,12 @@ def _gen_code(rng: random.Random) -> str:
 @dataclass
 class Room:
     code: str
+    game_type: str
     num_players: int
-    variant: Variant
+    options: dict
     host_id: Optional[str] = None
     players: list[Player] = field(default_factory=list)   # in join order
-    game: Optional[Game] = None
+    game: Optional[BaseGame] = None
     sockets: dict[str, WebSocket] = field(default_factory=dict)
     chat_log: list[dict] = field(default_factory=list)
     clearing: bool = False   # guards the async post-trick clear (one task at a time)
@@ -44,6 +45,10 @@ class Room:
     # Pending disconnect→bot conversion tasks, keyed by player_id. Cancelled if
     # the player reconnects before the grace period expires.
     conversion_timers: dict = field(default_factory=dict)
+
+    @property
+    def spec(self) -> GameSpec:
+        return get_game_spec(self.game_type)
 
     @property
     def started(self) -> bool:
@@ -117,7 +122,7 @@ class Room:
         random.Random().shuffle(shuffled)
         for seat, p in enumerate(shuffled):
             p.join_order = seat
-        self.game = Game(self.num_players, self.variant, self.players)
+        self.game = self.spec.engine_factory(self.num_players, self.options, self.players, random.Random())
         self.game.start()
 
     def add_one_bot(self, player_id: str) -> None:
@@ -140,10 +145,13 @@ class Room:
             self.add_bot()
 
     def lobby_snapshot(self) -> dict:
+        spec = self.spec
         return {
             "code": self.code,
+            "game_type": self.game_type,
+            "game_name": spec.display_name,
             "num_players": self.num_players,
-            "variant": self.variant.value,
+            "options": self.options,
             "host_id": self.host_id,
             "started": self.started,
             "players": [
@@ -158,13 +166,16 @@ class RoomManager:
         self.rooms: dict[str, Room] = {}
         self._rng = random.Random()
 
-    def create_room(self, num_players: int, variant: Variant) -> Room:
-        if num_players not in (4, 5, 6):
-            raise GameError("num_players must be 4, 5, or 6")
+    def create_room(self, game_type: str, num_players: int, options: dict) -> Room:
+        spec = get_game_spec(game_type)
+        if not (spec.min_players <= num_players <= spec.max_players):
+            raise GameError(
+                f"{spec.display_name} supports {spec.min_players}-{spec.max_players} players"
+            )
         code = _gen_code(self._rng)
         while code in self.rooms:
             code = _gen_code(self._rng)
-        room = Room(code=code, num_players=num_players, variant=variant)
+        room = Room(code=code, game_type=game_type, num_players=num_players, options=options)
         self.rooms[code] = room
         return room
 

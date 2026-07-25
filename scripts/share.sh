@@ -14,7 +14,7 @@ echo "==> Building frontend (so the backend can serve it single-origin)…"
 if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:8000/; then
   echo "==> Starting backend on :8000…"
   (cd "$ROOT/backend" && .venv/bin/python -m uvicorn app.main:app --port 8000 \
-      >/tmp/lakdi-backend.log 2>&1 &)
+      >/tmp/taashclub-backend.log 2>&1 &)
   for _ in $(seq 1 20); do
     curl -s -o /dev/null --max-time 2 http://127.0.0.1:8000/ && break || sleep 0.5
   done

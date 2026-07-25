@@ -1,6 +1,6 @@
 """Socket-level checks for the post-trick hold and the chat channel.
 
-Run against a server started with LAKDI_TRICK_HOLD=2 (see the runner below).
+Run against a server started with TAASHCLUB_TRICK_HOLD=2 (see the runner below).
 """
 import asyncio
 import json
@@ -9,8 +9,8 @@ import urllib.request
 
 import websockets
 
-PORT = os.environ.get("LAKDI_PORT", "8011")
-HOLD = float(os.environ.get("LAKDI_TRICK_HOLD", "2"))
+PORT = os.environ.get("TAASHCLUB_PORT", "8011")
+HOLD = float(os.environ.get("TAASHCLUB_TRICK_HOLD", "2"))
 BASE = f"http://127.0.0.1:{PORT}"
 WS = f"ws://127.0.0.1:{PORT}"
 
@@ -23,7 +23,7 @@ def post(path, body):
 
 
 async def main():
-    code = post("/rooms", {"num_players": 4, "variant": "single_run"})["code"]
+    code = post("/rooms", {"game_type": "callbreak", "num_players": 4, "options": {"variant": "single_run"}})["code"]
     players = [post(f"/rooms/{code}/join", {"name": n})["player_id"]
                for n in ["Alice", "Bob", "Cara", "Dan"]]
     idx = {pid: i for i, pid in enumerate(players)}
@@ -61,7 +61,7 @@ async def main():
     for _ in range(4):
         s = latest[players[0]]
         cur = s["current_player_id"]
-        await send(idx[cur], {"type": "place_bid", "value": 1})
+        await send(idx[cur], {"type": "action", "action": "place_bid", "params": {"value": 1}})
         await wait(lambda: latest[players[0]].get("current_player_id") != cur or
                    latest[players[0]]["phase"] != "bidding")
     await wait(lambda: latest[players[0]]["phase"] == "playing")
@@ -72,7 +72,7 @@ async def main():
         cur = s["current_player_id"]
         assert cur is not None, "expected a player on turn"
         legal = latest[cur]["your_legal_cards"]
-        await send(idx[cur], {"type": "play_card", "card": legal[0]})
+        await send(idx[cur], {"type": "action", "action": "play_card", "params": {"card": legal[0]}})
         await wait(lambda: latest[players[0]].get("current_player_id") != cur)
 
     # Immediately after the 4th card: trick is HELD.

@@ -1,4 +1,4 @@
-import type { Variant } from "./types";
+import type { GameInfo } from "./types";
 
 // In dev (vite on :5173) the backend runs separately on :8000.
 // In production the FastAPI server serves this bundle, so everything is
@@ -23,8 +23,22 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
-export function createRoom(num_players: number, variant: Variant) {
-  return post<{ code: string }>("/rooms", { num_players, variant });
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(API_BASE + path);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export function fetchGames() {
+  return get<GameInfo[]>("/games");
+}
+
+export function createRoom(gameType: string, numPlayers: number, options: Record<string, unknown>) {
+  return post<{ code: string }>("/rooms", {
+    game_type: gameType,
+    num_players: numPlayers,
+    options,
+  });
 }
 
 export function joinRoom(code: string, name: string) {

@@ -1,40 +1,22 @@
-"""LAKDI bot brain — pure heuristics, no networking.
+"""Callbreak bot brain — pure heuristics, no networking.
 
 ``bot_bid`` and ``bot_play`` take a ``Game`` and a bot ``player_id`` and return a
 legal decision. They never touch state; the caller (the bot driver in
 ``main.py``) applies the returned action to the engine.
+
+``CallbreakBotBrain`` wraps them to satisfy the generic ``BotBrain`` protocol,
+returning an ``(action, params)`` envelope so the driver never branches on
+Callbreak-specific phases.
 """
 from __future__ import annotations
 
 import random
 from typing import TYPE_CHECKING
 
-from .models import Card, Suit
+from ..base import Card, GameError, Phase, Suit
 
 if TYPE_CHECKING:
     from .engine import Game
-
-# ~25 quirky, short (<=12 letters) names. Picked at random for bot seats;
-# duplicates within a single room are avoided by ``Room.add_bot``.
-BOT_NAMES = [
-    "Ace", "Jokerman", "SirTrump", "Cleo", "CardShark",
-    "Dealer", "Trumpzilla", "BidRogue", "NoTrump", "Slick",
-    "Royal", "JokerJr", "Sneaky", "WildCard", "QueenBee",
-    "KingMe", "Deuce", "HighRoll", "MiniAce", "ClubKing",
-    "Spadey", "HeartBreak", "Diamondog", "FaceCard", "LowRoll",
-]
-
-
-def random_bot_name(rng: random.Random, taken: set[str]) -> str:
-    """Pick a bot name not already in ``taken`` (existing players + bots)."""
-    available = [n for n in BOT_NAMES if n not in taken]
-    if not available:
-        # All names in use (very unlikely); synthesize a unique fallback.
-        i = 1
-        while f"Bot{i}" in taken:
-            i += 1
-        return f"Bot{i}"
-    return rng.choice(available)
 
 
 def bot_bid(game: "Game", player_id: str, rng: random.Random) -> int:
@@ -144,3 +126,20 @@ def bot_play(game: "Game", player_id: str, rng: random.Random) -> Card:
         return low(led_legal)
     non_trump = [c for c in legal if c.suit != trump]
     return low(non_trump) if non_trump else low(legal)
+
+
+class CallbreakBotBrain:
+    """Adapts ``bot_bid``/``bot_play`` to the generic ``BotBrain`` protocol.
+
+    Inspects the current phase and returns an ``(action, params)`` envelope the
+    generic driver applies via ``game.apply_action``.
+    """
+
+    def decide_action(
+        self, game: "Game", player_id: str, rng: random.Random
+    ) -> tuple[str, dict]:
+        if game.phase == Phase.BIDDING:
+            return "place_bid", {"value": bot_bid(game, player_id, rng)}
+        if game.phase == Phase.PLAYING and not game.awaiting_trick_clear:
+            return "play_card", {"card": bot_play(game, player_id, rng).to_dict()}
+        raise GameError("no bot action available in this phase")

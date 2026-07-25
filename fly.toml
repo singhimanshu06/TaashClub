@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for lakdi on 2026-07-24T19:43:20+05:30
+# fly.toml app configuration file generated for taashclub on 2026-07-24T19:43:20+05:30
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -9,7 +9,7 @@
 # change, verify with `fly scale count 1` to prevent Fly from maintaining
 # extra machines.
 
-app = 'lakdi'
+app = 'taashclub'
 primary_region = 'lhr'
 
 [build]

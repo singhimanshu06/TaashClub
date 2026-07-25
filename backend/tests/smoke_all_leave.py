@@ -1,7 +1,7 @@
 """Test: when all humans disconnect, the game ends after the grace period.
 
 Creates a 4-player friends game (4 real sockets), starts it, then disconnects
-all 4 players. After LAKDI_BOT_CONVERSION_GRACE seconds the server should
+all 4 players. After TAASHCLUB_BOT_CONVERSION_GRACE seconds the server should
 convert seats to bots and — finding no humans left — force_end the game.
 """
 import asyncio
@@ -11,10 +11,10 @@ import urllib.request
 
 import websockets
 
-PORT = os.environ.get("LAKDI_PORT", "8000")
+PORT = os.environ.get("TAASHCLUB_PORT", "8000")
 BASE = f"http://127.0.0.1:{PORT}"
 WS = f"ws://127.0.0.1:{PORT}"
-GRACE = float(os.environ.get("LAKDI_BOT_CONVERSION_GRACE", "30"))
+GRACE = float(os.environ.get("TAASHCLUB_BOT_CONVERSION_GRACE", "30"))
 
 
 def post(path, body):
@@ -25,7 +25,7 @@ def post(path, body):
 
 
 async def main():
-    code = post("/rooms", {"num_players": 4, "variant": "single_run"})["code"]
+    code = post("/rooms", {"game_type": "callbreak", "num_players": 4, "options": {"variant": "single_run"}})["code"]
     players = [post(f"/rooms/{code}/join", {"name": n})["player_id"]
                for n in ["Alice", "Bob", "Cara", "Dan"]]
 

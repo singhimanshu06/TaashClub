@@ -1,8 +1,16 @@
-import type { GameState, RoundHistoryEntry } from "../types";
+import type { GameState, RoundHistoryEntry } from "../../types";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
 
-export default function DetailedScores({ game, playerId, onBack }: { game: GameState; playerId: string; onBack: () => void }) {
+export default function CallbreakDetailedScores({
+  game,
+  playerId,
+  onBack,
+}: {
+  game: GameState;
+  playerId: string;
+  onBack: () => void;
+}) {
   // Players in seat order (stable columns across all rounds).
   const players = [...game.players].sort((a, b) => a.seat - b.seat);
   const history: RoundHistoryEntry[] = game.round_history ?? [];
@@ -14,8 +22,8 @@ export default function DetailedScores({ game, playerId, onBack }: { game: GameS
     const pts: Record<string, number> = {};
     const hit: Record<string, boolean> = {};
     for (const row of r.results) {
-      pts[row.player_id] = row.points;
-      hit[row.player_id] = row.hit;
+      pts[row.player_id] = row.points ?? 0;
+      hit[row.player_id] = row.hit ?? false;
     }
     pointsByRound[r.round_index] = pts;
     hitByRound[r.round_index] = hit;
