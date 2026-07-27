@@ -7,6 +7,7 @@ import Hand from "./Hand";
 import GameOver from "./GameOver";
 import Scorecard from "./Scorecard";
 import { getGameSlots } from "../games/registry";
+import { playSound, isMuted, setMuted } from "../sounds";
 
 /** Normalize a trick entry's cards: President sends ``cards`` (array), Callbreak
  *  sends ``card`` (single). Returns a flat list of cards. */
@@ -73,6 +74,40 @@ export default function GameTable() {
   const isMyTurn = game.current_player_id === playerId;
   const nameById = (id: string) => game.players.find((p) => p.id === id)?.name ?? "";
 
+  const [muted, setMutedState] = useState(isMuted());
+
+  // Sound triggers — fire on transitions rather than absolute state. Refs
+  // start at null so the very first round (where GameTable mounts already in
+  // the "bidding" phase) is treated as a transition and still plays.
+  const prevPhase = useRef<string | null>(null);
+  const prevTurn = useRef<string | null>(null);
+  useEffect(() => {
+    const prevP = prevPhase.current;
+    const curP = game.phase;
+    const curTurn = game.current_player_id;
+    const prevT = prevTurn.current;
+
+    // Card distribution: when a new round is dealt (entering the bidding phase).
+    if (prevP !== "bidding" && curP === "bidding") {
+      playSound("card_distribution");
+    }
+    // Turn to bid: when it becomes my turn to bid.
+    if (curP === "bidding" && curTurn === playerId && prevT !== playerId) {
+      playSound("turn_to_bid");
+    }
+    // Turn to play: when it becomes my turn to play a card.
+    if (curP === "playing" && curTurn === playerId && prevT !== playerId) {
+      playSound("turn_to_play");
+    }
+    // Score board: when a round ends and the scoreboard appears.
+    if (prevP !== "round_end" && curP === "round_end") {
+      playSound("score_board");
+    }
+
+    prevPhase.current = curP;
+    prevTurn.current = curTurn;
+  }, [game.phase, game.current_player_id, playerId]);
+
   // Field name compatibility: Callbreak uses total_rounds/cards_this_round,
   // President uses rounds_total. cards_this_round is absent for President.
   const totalRounds = game.rounds_total ?? game.total_rounds;
@@ -103,6 +138,18 @@ export default function GameTable() {
           )}
         </div>
         <div className="status-right">
+          <button
+            className="mute-btn"
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setMutedState(next);
+            }}
+            title={muted ? "Unmute sound" : "Mute sound"}
+            aria-label={muted ? "Unmute sound" : "Mute sound"}
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
           <button className="leave-btn" onClick={reset} title="Leave game">
             ← Leave
           </button>

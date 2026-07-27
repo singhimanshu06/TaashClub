@@ -1199,6 +1199,23 @@ body {
   border-color: rgba(255, 107, 107, 0.7);
 }
 
+/* ---------- Mute toggle ---------- */
+.mute-btn {
+  background: rgba(233, 196, 106, 0.12);
+  border: 1px solid rgba(233, 196, 106, 0.35);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
+}
+.mute-btn:hover {
+  background: rgba(233, 196, 106, 0.25);
+  border-color: rgba(233, 196, 106, 0.6);
+}
+
 /* ---------- Chat ---------- */
 .chat-fab {
   position: fixed;
