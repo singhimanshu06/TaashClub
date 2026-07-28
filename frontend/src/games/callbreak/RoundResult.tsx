@@ -13,7 +13,12 @@ export default function CallbreakRoundResult({
   const { playerId, isHost } = useStore(
     useShallow((s) => ({
       playerId: s.playerId,
-      isHost: s.lobby?.host_id === s.playerId,
+      // Prefer host_id carried on the game state — it's the only source that
+      // survives a mid-game reload (when s.lobby becomes null and no
+      // lobby_update follows). Fall back to the lobby snapshot as a
+      // belt-and-suspenders for the brief window before the first state_update
+      // arrives on a fresh connect.
+      isHost: (s.game?.host_id ?? s.lobby?.host_id) === s.playerId,
     }))
   );
   const rows = game.last_round_result ?? [];
