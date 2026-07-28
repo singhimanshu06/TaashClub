@@ -13,7 +13,9 @@ export default function PresidentRoundResult({
   const { playerId, isHost } = useStore(
     useShallow((s) => ({
       playerId: s.playerId,
-      isHost: s.lobby?.host_id === s.playerId,
+      // Prefer host_id carried on the game state — see CallbreakRoundResult
+      // for the full reasoning; same mid-game-reload bug applies here.
+      isHost: (s.game?.host_id ?? s.lobby?.host_id) === s.playerId,
     }))
   );
   const rows = game.last_round_result ?? [];

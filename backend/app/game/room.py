@@ -219,7 +219,15 @@ class ConnectionManager:
         """Send each connected player their own redacted view of the game/lobby."""
         for player_id, ws in list(room.sockets.items()):
             if room.game is not None:
-                payload = {"type": "state_update", "state": room.game.to_state(player_id)}
+                state = room.game.to_state(player_id)
+                # host_id is owned by the room, not the engine. Inject it into
+                # every in-game state broadcast so clients can identify the host
+                # even after a mid-game reload — at that point s.lobby is null
+                # and no lobby_update will follow, so the client would otherwise
+                # never learn who the host is, and host-only controls (e.g. the
+                # "Next round" button on the round-end scoreboard) never appear.
+                state["host_id"] = room.host_id
+                payload = {"type": "state_update", "state": state}
             else:
                 payload = {"type": "lobby_update", "lobby": room.lobby_snapshot()}
             try:

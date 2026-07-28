@@ -95,6 +95,10 @@ export interface GameState {
   last_round_result: RoundResultRow[] | null;
   round_history: RoundHistoryEntry[];
   final_standings: Standing[] | null;
+  // Room-level host id, attached to every state_update by the server. Present
+  // during gameplay so clients can identify the host even after a mid-game
+  // reload (no lobby_update is sent once the game has started).
+  host_id?: string | null;
   // President-specific (optional; absent for Callbreak):
   pile_top?: { rank: number; size: number; player_id: string } | null;
   roles?: Record<string, string>;
