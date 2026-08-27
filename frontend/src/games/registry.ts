@@ -31,6 +31,10 @@ export interface GameSlots {
   /** Per-seat stats line inside an opponent tile (e.g. "Bid 3 · Won 2"). */
   SeatStats?: ComponentType<{ game: GameState; player: StatePlayer; phase: string }>;
 
+  /** Stats line inside the viewer's own chip (e.g. "Pts 12 · Bid 20").
+   *  When absent, GameTable falls back to the generic "won X / bid Y". */
+  SelfStats?: ComponentType<{ game: GameState; player: StatePlayer }>;
+
   /** Round-end modal. */
   RoundResult?: ComponentType<{
     game: GameState;

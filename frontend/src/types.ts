@@ -36,6 +36,7 @@ export interface StatePlayer {
   hand: CardT[] | null; // only for the viewer
   connected: boolean;
   is_bot?: boolean;
+  passed?: boolean; // Twenty-Eight: locked out of the auction
   total_score: number; // cumulative through completed rounds (0 during round 1)
 }
 
@@ -47,7 +48,7 @@ export interface TrickCard {
 export interface RoundResultRow {
   player_id: string;
   name: string;
-  // Callbreak fields:
+  // Callbreak / Twenty-Eight fields:
   bid?: number;
   tricks_won?: number;
   points?: number;
@@ -62,7 +63,12 @@ export interface RoundResultRow {
 export interface RoundHistoryEntry {
   round_index: number;
   trump: Suit | null;
-  cards_this_round: number;
+  cards_this_round?: number;
+  // Twenty-Eight fields:
+  bidder_id?: string;
+  high_bid?: number;
+  captured_points?: number;
+  bid_made?: boolean;
   results: RoundResultRow[];
 }
 
@@ -110,6 +116,20 @@ export interface GameState {
   } | null;
   finish_order?: string[];
   skipped_player_ids?: string[];
+  // Twenty-Eight-specific (optional; absent for other games):
+  high_bid?: number | null; // standing auction bid (14-28)
+  bidder_id?: string | null; // winner of the auction
+  awaiting_trump?: boolean; // auction over, bidder must name trump
+  trump_exposed?: boolean; // hidden trump revealed to all
+  dealer_id?: string | null;
+  // Optional team mapping for team games: playerId -> team id ("0", "1", …).
+  // Drives team-wise scoreboard rendering (GameTable tinting, GameOver,
+  // Scorecard). Only Twenty-Eight sends it today.
+  teams?: Record<string, string | number>;
+  // Team id -> cumulative score (Twenty-Eight partnerships).
+  team_scores?: Record<string, number>;
+  // Team id -> card points captured in tricks so far this deal (Twenty-Eight).
+  team_captured?: Record<string, number>;
 }
 
 export interface ChatMessage {

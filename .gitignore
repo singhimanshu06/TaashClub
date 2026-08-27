@@ -16,3 +16,9 @@ Thumbs.db
 # Env
 .env
 .env.*
+
+# Build / tooling caches
+frontend/tsconfig.tsbuildinfo
+
+# IDE
+.idea/

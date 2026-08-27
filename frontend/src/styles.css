@@ -670,11 +670,10 @@ body {
   padding: 14px;
 }
 .status-bar {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
+  align-items: start;
   gap: 10px;
-  justify-content: space-between;
-  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 .status-left,
@@ -682,7 +681,6 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1 1 0;
 }
 .status-right {
   justify-content: flex-end;
@@ -729,19 +727,47 @@ body {
   font-weight: 600;
 }
 
-.opponents {
+/* ---------- Oval table ---------- */
+.table-stage {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  min-height: 320px;
+  margin: 6px auto;
+}
+.felt {
+  position: absolute;
+  /* Inset the ellipse within the stage so it doesn't touch the status bar
+     above or the viewer's cards below. */
+  inset: 32px 48px;
   display: flex;
-  gap: 14px;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
+  gap: 14px;
+  padding: 40px 72px;
+  background: radial-gradient(ellipse at center, var(--felt-1), var(--felt-2));
+  border: 10px solid var(--felt-edge);
+  border-radius: 50% / 50%;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5), 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.seat-pos {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+/* Lift the seat whose turn it is so highlight glow isn't clipped by neighbors */
+.seat-pos-current {
+  z-index: 7;
 }
 .seat-tile {
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px;
-  padding: 10px 12px;
-  min-width: 130px;
+  padding: 8px 10px;
+  min-width: 106px;
+  text-align: center;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .seat-tile.current {
@@ -755,31 +781,101 @@ body {
 .seat-head {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 .seat-avatar {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   color: var(--ink);
   font-weight: 800;
+  font-size: 0.85rem;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .seat-label {
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
 }
 .starter-star {
   color: var(--gold-bright);
   margin-left: 4px;
 }
 .seat-stats {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--muted);
-  margin: 6px 0;
+  margin-top: 4px;
+}
+
+/* Team tinting — inert until a game sends `teams`; key off avatar ring. */
+.team-0 .seat-avatar,
+.self-chip.team-0 .seat-avatar {
+  box-shadow: 0 0 0 2px #4da3ff;
+}
+.team-1 .seat-avatar,
+.self-chip.team-1 .seat-avatar {
+  box-shadow: 0 0 0 2px #ff7ad9;
+}
+.team-2 .seat-avatar,
+.self-chip.team-2 .seat-avatar {
+  box-shadow: 0 0 0 2px #8ce99a;
+}
+.team-3 .seat-avatar,
+.self-chip.team-3 .seat-avatar {
+  box-shadow: 0 0 0 2px #ffa94d;
+}
+
+/* Viewer's own chip on the bottom rim of the oval */
+.self-pos {
+  z-index: 6;
+}
+.self-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 5px 14px;
+  border-radius: 18px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  white-space: nowrap;
+}
+.self-chip .your-stats {
+  font-weight: 500;
+}
+
+/* Rotate-your-phone hint */
+.rotate-hint {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  color: var(--gold-bright);
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 8px 10px 8px 16px;
+  border-radius: 20px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+}
+.rotate-hint button {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
 }
 .bid-locked {
   color: var(--gold-bright);
@@ -789,22 +885,6 @@ body {
   color: var(--text);
 }
 
-.felt {
-  flex: 1;
-  margin: 10px auto;
-  width: min(760px, 96%);
-  border-radius: 140px;
-  background: radial-gradient(ellipse at center, var(--felt-1), var(--felt-2));
-  border: 10px solid var(--felt-edge);
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5), 0 10px 40px rgba(0, 0, 0, 0.5);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 24px;
-  min-height: 240px;
-}
 .felt-hint {
   color: var(--gold-bright);
   font-weight: 600;
@@ -865,14 +945,6 @@ body {
   border-color: var(--gold-bright);
   box-shadow: 0 0 22px rgba(233, 196, 106, 0.4);
 }
-.your-tag {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  margin-bottom: 10px;
-  color: var(--gold-bright);
-}
 .your-stats {
   color: var(--muted);
   font-weight: 500;
@@ -894,6 +966,43 @@ body {
   padding: 10px 16px;
   margin-bottom: 12px;
   text-align: center;
+}
+/* Twenty-Eight helpers: panel hint line + bidder badge on seat tiles. */
+.bid-panel .panel-title {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+/* Suit icon buttons in the trump picker — same gold as the bid button so the
+   black suits stay visible. Vertically ~25% shorter than a standard chip. */
+.chip.suit-chip {
+  display: inline-flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px;
+  font-weight: 700;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+}
+.suit-icon {
+  width: 18px;
+  height: 24px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+.bidder-tag {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--red);
+}
+/* Team member names under a detailed-scorecard team header. */
+.detailed-table th .team-members {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  opacity: 0.75;
 }
 .bid-row {
   display: flex;
@@ -1344,20 +1453,66 @@ body {
   cursor: not-allowed;
 }
 
+/* Stack round-info chips into their own full-width, perfectly centered row
+   once the bar gets tight — the side columns (Scores vs mute/Leave) have
+   different natural widths, so a chips-wrapped middle column drifts off
+   center. Spanning all columns removes that drift entirely. */
+@media (max-width: 768px) {
+  .status-center {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 @media (max-width: 640px) {
+  .table-stage {
+    min-height: 260px;
+  }
   .felt {
-    border-radius: 80px;
-    min-height: 200px;
+    inset: 20px 26px;
+    padding: 26px 34px;
   }
   .card-lg {
     width: 72px;
     height: 100px;
   }
-  .opponents {
-    gap: 8px;
-  }
   .seat-tile {
-    min-width: 104px;
+    min-width: 84px;
+    padding: 6px 7px;
+    border-radius: 11px;
+  }
+  .seat-label {
+    font-size: 0.74rem;
+  }
+  .seat-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 0.72rem;
+  }
+  .seat-stats {
+    font-size: 0.68rem;
+  }
+  .self-chip {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+  .status-bar {
+    gap: 6px;
+  }
+  .status-chip {
+    padding: 5px 10px;
+    font-size: 0.78rem;
+  }
+  .leave-btn {
+    padding: 5px 9px;
+    font-size: 0.74rem;
+  }
+  .mute-btn {
+    padding: 5px 8px;
+    font-size: 0.92rem;
   }
 }
 

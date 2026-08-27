@@ -7,6 +7,7 @@ import Hand from "./Hand";
 import GameOver from "./GameOver";
 import Scorecard from "./Scorecard";
 import { getGameSlots } from "../games/registry";
+import { seatPositions } from "../table/seating";
 import { playSound, isMuted, setMuted } from "../sounds";
 
 /** Normalize a trick entry's cards: President sends ``cards`` (array), Callbreak
@@ -66,13 +67,29 @@ export default function GameTable() {
   const StatusExtra = slots.StatusExtra;
   const ActionPanel = slots.ActionPanel;
   const SeatStats = slots.SeatStats;
+  const SelfStats = slots.SelfStats;
   const RoundResult = slots.RoundResult;
   const rendersOwnHand = slots.rendersOwnHand ?? false;
 
   const me = game.players.find((p) => p.id === playerId);
-  const others = game.players.filter((p) => p.id !== playerId);
   const isMyTurn = game.current_player_id === playerId;
   const nameById = (id: string) => game.players.find((p) => p.id === id)?.name ?? "";
+
+  // Ring layout: everyone in play order (seat number ascending), viewer pinned
+  // bottom-center. Even spacing preserves turn order around the table and puts
+  // alternately-seated partners diametrically opposite in team games.
+  const ordered = [...game.players].sort((a, b) => a.seat - b.seat);
+  const viewerIndex = Math.max(
+    ordered.findIndex((p) => p.id === playerId),
+    0
+  );
+  const seatPos = seatPositions(ordered.length, viewerIndex);
+
+  // Team tinting — inert until a future team game sends `teams`.
+  const teamClass = (id: string) => {
+    const t = game.teams?.[id];
+    return t != null ? ` team-${String(t).replace(/\W/g, "")}` : "";
+  };
 
   const [muted, setMutedState] = useState(isMuted());
 
@@ -156,73 +173,93 @@ export default function GameTable() {
         </div>
       </div>
 
-      {/* Opponents */}
-      <div className="opponents">
-        {others.map((p) => (
-          <Seat
-            key={p.id}
-            p={p}
-            isCurrent={game.current_player_id === p.id}
-            isStarter={game.starter_id === p.id}
-            isWinner={game.awaiting_trick_clear && game.trick_winner_id === p.id}
-            phase={game.phase}
-            Stats={SeatStats ?? (() => null)}
-            game={game}
-          />
-        ))}
-      </div>
-
-      {/* Felt center: current trick */}
-      <div className="felt">
-        {game.phase === "playing" && !game.awaiting_trick_clear && game.current_trick.length === 0 && (
-          <p className="felt-hint">
-            {isMyTurn ? "Your lead" : `${nameById(game.current_player_id ?? "")} to lead`}
-          </p>
-        )}
-        <div className="trick-area">
-          {game.current_trick.map((t, i) => {
-            const cards = trickCards(t);
-            return (
-              <div key={`${t.player_id}-${i}`} className="trick-slot">
-                {cards.map((c, j) => (
-                  <PlayingCard
-                    key={j}
-                    card={c}
-                    size="md"
-                    highlight={game.awaiting_trick_clear && game.trick_winner_id === t.player_id}
-                  />
-                ))}
-                <span className="trick-owner">{nameById(t.player_id)}</span>
-              </div>
-            );
-          })}
+      {/* Oval table: seats around the rim, trick in the center */}
+      <div className="table-stage">
+        <div className="felt">
+          {game.phase === "playing" && !game.awaiting_trick_clear && game.current_trick.length === 0 && (
+            <p className="felt-hint">
+              {isMyTurn ? "Your lead" : `${nameById(game.current_player_id ?? "")} to lead`}
+            </p>
+          )}
+          <div className="trick-area">
+            {game.current_trick.map((t, i) => {
+              const cards = trickCards(t);
+              return (
+                <div key={`${t.player_id}-${i}`} className="trick-slot">
+                  {cards.map((c, j) => (
+                    <PlayingCard
+                      key={j}
+                      card={c}
+                      size="md"
+                      highlight={game.awaiting_trick_clear && game.trick_winner_id === t.player_id}
+                    />
+                  ))}
+                  <span className="trick-owner">{nameById(t.player_id)}</span>
+                </div>
+              );
+            })}
+          </div>
+          {game.awaiting_trick_clear && game.trick_winner_id && (
+            <p className="felt-hint winner-banner">🏆 {nameById(game.trick_winner_id)} wins the trick</p>
+          )}
+          {game.phase === "bidding" && (
+            <p className="felt-hint">
+              {isMyTurn ? "Your turn to bid" : `${nameById(game.current_player_id ?? "")} is bidding…`}
+            </p>
+          )}
+          {game.phase === "exchange" && (
+            <p className="felt-hint">
+              Card exchange in progress…
+            </p>
+          )}
+          <SkipPopup game={game} nameById={nameById} />
         </div>
-        {game.awaiting_trick_clear && game.trick_winner_id && (
-          <p className="felt-hint winner-banner">🏆 {nameById(game.trick_winner_id)} wins the trick</p>
+
+        {/* Seats on the rim (positioned by play order; viewer bottom-center) */}
+        {ordered.map((p, i) =>
+          p.id === playerId ? null : (
+            <div
+              key={p.id}
+              className={`seat-pos${game.current_player_id === p.id ? " seat-pos-current" : ""}`}
+              style={{ left: `${seatPos[i].left}%`, top: `${seatPos[i].top}%` }}
+            >
+              <Seat
+                p={p}
+                isCurrent={game.current_player_id === p.id}
+                isStarter={game.starter_id === p.id}
+                isWinner={game.awaiting_trick_clear && game.trick_winner_id === p.id}
+                phase={game.phase}
+                Stats={SeatStats ?? (() => null)}
+                game={game}
+              />
+            </div>
+          )
         )}
-        {game.phase === "bidding" && (
-          <p className="felt-hint">
-            {isMyTurn ? "Your turn to bid" : `${nameById(game.current_player_id ?? "")} is bidding…`}
-          </p>
-        )}
-        {game.phase === "exchange" && (
-          <p className="felt-hint">
-            Card exchange in progress…
-          </p>
-        )}
-        <SkipPopup game={game} nameById={nameById} />
+
+        {/* Viewer's own chip sits above the hand strip */}
+        <div
+          className={`seat-pos self-pos${isMyTurn ? " seat-pos-current" : ""}`}
+          style={{ left: "50%", top: "96%" }}
+        >
+          <div className={`self-chip${teamClass(playerId)}`}>
+            <span className="seat-avatar">{me.name.charAt(0).toUpperCase()}</span>
+            <span>{me.name} (you)</span>
+            {SelfStats ? (
+              <SelfStats game={game} player={me} />
+            ) : (
+              me.bid !== null &&
+              me.bid !== undefined && (
+                <span className="your-stats">
+                  won {me.tricks_won} / bid {me.bid}
+                </span>
+              )
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Your area */}
       <div className={`your-area${isMyTurn ? " active" : ""}`}>
-        <div className="your-tag">
-          {me.name} (you)
-          {me.bid !== null && me.bid !== undefined && (
-            <span className="your-stats">
-              won {me.tricks_won} / bid {me.bid}
-            </span>
-          )}
-        </div>
         {/* Action panel (e.g. bid picker or combo selector) sits ABOVE the hand. */}
         {ActionPanel && (
           <ActionPanel game={game} isMyTurn={isMyTurn} sendAction={sendAction} />
@@ -240,10 +277,39 @@ export default function GameTable() {
       </div>
 
       {/* Overlays */}
+      <RotateHint active={game.num_players >= 5} />
       {game.phase === "round_end" && RoundResult && (
         <RoundResult game={game} sendAction={sendAction} />
       )}
       {game.phase === "game_end" && <GameOver game={game} />}
+    </div>
+  );
+}
+
+/**
+ * Dismissible "rotate your phone" hint. Shown on portrait phones only when the
+ * seat count is high enough that a landscape oval breathes better.
+ */
+function RotateHint({ active }: { active: boolean }) {
+  const [dismissed, setDismissed] = useState(false);
+  const [portrait, setPortrait] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(orientation: portrait)").matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(orientation: portrait)");
+    const onChange = (e: MediaQueryListEvent) => setPortrait(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  if (!active || dismissed || !portrait) return null;
+  return (
+    <div className="rotate-hint">
+      <span>↻ Rotate your phone for a better view</span>
+      <button onClick={() => setDismissed(true)} aria-label="Dismiss">
+        ×
+      </button>
     </div>
   );
 }

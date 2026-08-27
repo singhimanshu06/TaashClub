@@ -5,6 +5,7 @@ import type { GameInfo } from "../types";
 import { getGameSlots } from "../games/registry";
 import { RULES as CALLBREAK_RULES } from "../games/callbreak";
 import { RULES as PRESIDENT_RULES } from "../games/president";
+import { RULES as TWENTYEIGHT_RULES } from "../games/twentyeight";
 
 function roomFromUrl(): string {
   return new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
@@ -15,6 +16,7 @@ function roomFromUrl(): string {
 function rulesFor(info: GameInfo): string[] {
   if (info.game_type === "callbreak") return CALLBREAK_RULES;
   if (info.game_type === "president") return PRESIDENT_RULES;
+  if (info.game_type === "twentyeight") return TWENTYEIGHT_RULES;
   return [info.description];
 }
 
