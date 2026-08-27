@@ -239,21 +239,25 @@ export default function GameTable() {
         {/* Viewer's own chip sits above the hand strip */}
         <div
           className={`seat-pos self-pos${isMyTurn ? " seat-pos-current" : ""}`}
-          style={{ left: "50%", top: "96%" }}
+          style={{ left: "50%", top: "87%" }}
         >
           <div className={`self-chip${teamClass(playerId)}`}>
-            <span className="seat-avatar">{me.name.charAt(0).toUpperCase()}</span>
-            <span>{me.name} (you)</span>
-            {SelfStats ? (
-              <SelfStats game={game} player={me} />
-            ) : (
-              me.bid !== null &&
-              me.bid !== undefined && (
-                <span className="your-stats">
-                  won {me.tricks_won} / bid {me.bid}
-                </span>
-              )
-            )}
+            <div className="seat-head">
+              <span className="seat-avatar">{me.name.charAt(0).toUpperCase()}</span>
+              <span className="seat-label">{me.name} (you)</span>
+            </div>
+            <div className="seat-stats">
+              {SelfStats ? (
+                <SelfStats game={game} player={me} />
+              ) : (
+                me.bid !== null &&
+                me.bid !== undefined && (
+                  <span className="your-stats">
+                    won {me.tricks_won} / bid {me.bid}
+                  </span>
+                )
+              )}
+            </div>
           </div>
         </div>
       </div>

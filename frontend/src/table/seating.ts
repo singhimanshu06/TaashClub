@@ -35,6 +35,6 @@ export function seatPositions(count: number, viewerIndex: number): SeatPos[] {
  *  stage so tiles never push past the viewport; tiles straddle the felt edge. */
 const RADIUS_X = 42;
 
-/** Vertical semi-axis (% of stage height). Slightly tighter horizontally-
- *  biased ovals look right on wide screens while staying clear of the hand. */
-const RADIUS_Y = 46;
+/** Vertical semi-axis (% of stage height). Kept small enough that the top
+ *  tile straddles the felt's top edge instead of clipping the status bar. */
+const RADIUS_Y = 37;

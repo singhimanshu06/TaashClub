@@ -834,16 +834,17 @@ body {
   z-index: 6;
 }
 .self-chip {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  padding: 5px 14px;
-  border-radius: 18px;
+  padding: 8px 10px;
+  border-radius: 14px;
   font-weight: 700;
   color: var(--gold-bright);
-  white-space: nowrap;
+  text-align: center;
 }
 .self-chip .your-stats {
   font-weight: 500;
@@ -1495,9 +1496,8 @@ body {
     font-size: 0.68rem;
   }
   .self-chip {
-    padding: 4px 10px;
-    font-size: 0.8rem;
-    gap: 6px;
+    padding: 6px 7px;
+    gap: 2px;
   }
   .status-bar {
     gap: 6px;
