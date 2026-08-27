@@ -20,6 +20,10 @@ from .president.engine import GAME_TYPE as PRESIDENT_TYPE
 from .president.engine import Game as PresidentGame
 from .president.bot import PresidentBotBrain
 from .president.models import DEFAULT_ROUND_COUNT, ROUND_COUNTS
+from .twentyeight.engine import GAME_TYPE as TWENTYEIGHT_TYPE
+from .twentyeight.engine import Game as TwentyEightGame
+from .twentyeight.bot import TwentyEightBotBrain
+from .twentyeight.models import DEFAULT_DEAL_COUNT, DEAL_COUNTS
 
 
 @dataclass
@@ -39,6 +43,12 @@ def _callbreak_factory(
 ) -> BaseGame:
     variant = Variant(options.get("variant", Variant.SINGLE_RUN.value))
     return CallbreakGame(num_players, variant, players, rng=rng)
+
+
+def _twentyeight_factory(
+    num_players: int, options: dict, players: list[Player], rng: random.Random
+) -> BaseGame:
+    return TwentyEightGame(num_players, options, players, rng=rng)
 
 
 def _president_factory(
@@ -79,6 +89,23 @@ GAME_REGISTRY: dict[str, GameSpec] = {
                 "values": [str(n) for n in ROUND_COUNTS],
                 "default": str(DEFAULT_ROUND_COUNT),
                 "labels": {str(n): f"{n} rounds" for n in ROUND_COUNTS},
+            },
+        },
+    ),
+    TWENTYEIGHT_TYPE: GameSpec(
+        game_type=TWENTYEIGHT_TYPE,
+        display_name="Twenty-Eight",
+        description="Partnership trick-taking with a hidden trump. Bid 14–28 card points, keep trump secret until revealed.",
+        min_players=4,
+        max_players=4,
+        engine_factory=_twentyeight_factory,
+        bot_brain=TwentyEightBotBrain(),
+        options_schema={
+            "deals": {
+                "type": "enum",
+                "values": [str(n) for n in DEAL_COUNTS],
+                "default": str(DEFAULT_DEAL_COUNT),
+                "labels": {str(n): f"{n} deals" for n in DEAL_COUNTS},
             },
         },
     ),
