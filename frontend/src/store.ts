@@ -42,6 +42,9 @@ let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let intendedClose = false; // true when we close the socket on purpose (reset/leave)
+// Players we have seen disconnect in this session. Used to only banner
+// "connected" on reconnection, never on the initial join at game start.
+const disconnectedPlayers = new Set<string>();
 
 function send(msg: object) {
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -88,8 +91,18 @@ function handleMessage(set: (partial: Partial<Store> | ((s: Store) => Partial<St
   } else if (msg.type === "chat") {
     set((s) => ({ messages: [...s.messages, msg.message as ChatMessage] }));
   } else if (msg.type === "player_status") {
+    const name = msg.name as string;
+    const isConnected = !!msg.connected;
+    // Suppress the "connected" banner for first-time joins (e.g. at game
+    // start); only show it when the player is coming back after a drop.
+    if (isConnected && !disconnectedPlayers.has(name)) return;
+    if (isConnected) {
+      disconnectedPlayers.delete(name);
+    } else {
+      disconnectedPlayers.add(name);
+    }
     set({
-      playerBanner: { name: msg.name as string, connected: !!msg.connected, ts: Date.now() },
+      playerBanner: { name, connected: isConnected, ts: Date.now() },
     });
   } else if (msg.type === "error") {
     set({ error: msg.message });
@@ -206,6 +219,7 @@ export const useStore = create<Store>((set, get) => ({
 
   enterRoom: (code, playerId) => {
     saveSession(code, playerId);
+    disconnectedPlayers.clear();
     set({ code, playerId, screen: "lobby", messages: [], reconnecting: false, reconnectAttempt: 0 });
     openSocket(set, get, code, playerId);
   },

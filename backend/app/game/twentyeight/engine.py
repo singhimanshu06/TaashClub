@@ -7,10 +7,13 @@ Rules implemented (original version):
 
 - 4 players, partnerships fixed by seating (seats 0/2 vs 1/3).
 - 32-card deck (7..A), ranking J > 9 > A > 10 > K > Q > 8 > 7.
-- Bidding 14..28 starting right after the dealer (clockwise); the opener must
-  bid and cannot pass; passing locks a player out; overcalling your own
-  partner's standing bid requires >= 20; three consecutive passes (equivalently,
-  everyone else having passed) ends the auction.
+- Each player is dealt only their first 4 cards before the auction; the
+  remaining 4 are held back and dealt once the winning bidder names trump.
+- Bidding 14..28 on the first 4 cards, starting right after the dealer
+  (clockwise); the opener must bid and cannot pass; passing locks a player
+  out; overcalling your own partner's standing bid requires >= 20; three
+  consecutive passes (equivalently, everyone else having passed) ends the
+  auction.
 - The winning bidder names the trump suit secretly (server-side state). Nobody
   else learns it until it is exposed. Play does not begin until trump is named.
 - While trump is hidden it behaves as an ordinary suit for everyone (including
@@ -21,8 +24,8 @@ Rules implemented (original version):
   BEFORE the exposure in the current trick stay ordinary cards. The exposing
   player must play a trump on that trick if they hold one.
 - Post-exposure follow rules: follow suit if able; if void you may play
-  anything, but must overtrump a trump played after the exposure by the
-  immediately preceding player if possible.
+  anything. The only extra obligation sits with the exposer themself (see
+  below).
 - Highest trump wins the trick (post-exposure cards only), else the highest
   card of the led suit.
 - A deal ends early (at trick commit) once the opposition has captured more
@@ -49,6 +52,7 @@ from .models import (
     CARDS_PER_PLAYER,
     DEFAULT_DEAL_COUNT,
     DEAL_COUNTS,
+    FIRST_DEAL_COUNT,
     GAME_TYPE,
     MAX_BID,
     MIN_BID,
@@ -111,6 +115,9 @@ class Game:
         self.last_trick_winner_seat: Optional[int] = None
         self.captured = [0, 0]                         # card points per team this deal
 
+        # Second half of each hand, held back until trump is named.
+        self.pending_cards: list[list[Card]] = []
+
         self.last_round_result: Optional[list[dict]] = None
         self.round_history: list[dict] = []
 
@@ -139,11 +146,19 @@ class Game:
         self.round_index += 1
         deck = build_28_deck()
         self.rng.shuffle(deck)
-        n = CARDS_PER_PLAYER
+        half = FIRST_DEAL_COUNT
         for seat, player in enumerate(self.players):
-            player.hand = sorted(deck[seat * n:(seat + 1) * n], key=hand_sort_key)
+            # Each seat's full 8-card allocation is a contiguous slice of the
+            # shuffled deck; only the first 4 go into the hand now. The rest
+            # are stored and dealt after the auction, when trump is named.
+            block = deck[seat * CARDS_PER_PLAYER:(seat + 1) * CARDS_PER_PLAYER]
+            player.hand = sorted(block[:half], key=hand_sort_key)
             player.bid = None
             player.tricks_won = 0
+        self.pending_cards = [
+            deck[seat * CARDS_PER_PLAYER + half:(seat + 1) * CARDS_PER_PLAYER]
+            for seat in range(self.num_players)
+        ]
 
         self.dealer_idx = self.round_index % self.num_players
         self.high_bid = None
@@ -249,6 +264,7 @@ class Game:
         self.turn_idx = self.bidder_seat
 
     def set_trump(self, player_id: str, suit: Suit) -> None:
+        """Bidder names the secret trump; the second 4 cards are then dealt."""
         if self.phase != Phase.BIDDING or not self.awaiting_trump:
             raise GameError("not waiting for trump")
         seat = self._seat_of(player_id)
@@ -263,6 +279,10 @@ class Game:
         self.trump = suit
         self.awaiting_trump = False
         self.trump_exposed = False
+        # Trump is fixed: deal the held-back half of every hand.
+        for seat, player in enumerate(self.players):
+            player.hand = sorted(player.hand + self.pending_cards[seat], key=hand_sort_key)
+        self.pending_cards = []
         self.phase = Phase.PLAYING
         self.turn_idx = (self.dealer_idx + 1) % self.num_players
         self.led_suit = None
@@ -273,10 +293,10 @@ class Game:
 
         Legal only for the player currently on turn who cannot follow the led
         suit (the original rule's trigger). From the next card onward the
-        revealed suit acts as trump for the rest of the deal; the caller must
+        revealed suit acts as trump for the rest of the deal; the exposer must
         play a trump on the current trick if they hold one (enforced by
-        legal_cards via the void check). Trump-suit cards already played to
-        this trick stay ordinary cards.
+        legal_cards), while other void players may play anything. Trump-suit
+        cards already played to this trick stay ordinary cards.
         """
         if self.phase != Phase.PLAYING:
             raise GameError("not in playing phase")
@@ -314,20 +334,13 @@ class Game:
             # Secret trump behaves like an ordinary suit — anything goes.
             return list(hand)
 
-        # Post-exposure: must overtrump the immediately preceding trump if
-        # able — but only when that trump was played AFTER the exposure
-        # (pre-exposure cards stay ordinary for the whole trick).
-        prev_idx = len(self.current_trick) - 1
-        exposed_here = self.expose_idx is None or prev_idx >= self.expose_idx
-        prev = self.current_trick[-1]["card"] if self.current_trick else None
-        if exposed_here and prev is not None and self.trump is not None and prev.suit == self.trump:
-            higher = [
-                c
-                for c in hand
-                if c.suit == self.trump and card_strength(c) > card_strength(prev)
-            ]
-            if higher:
-                return higher
+        # The player who just exposed trump must play a trump on this trick
+        # if they hold one (they are still on turn; exposure never advances
+        # it). Everyone else void in the led suit may play anything.
+        if self.expose_idx is not None and self.expose_idx == len(self.current_trick):
+            trumps = [c for c in hand if c.suit == self.trump]
+            if trumps:
+                return trumps
         return list(hand)
 
     def play_card(self, player_id: str, card: Card) -> None:
@@ -452,6 +465,7 @@ class Game:
         self.current_trick = []
         self.led_suit = None
         self.last_trick_winner_seat = None
+        self.pending_cards = []
         self.phase = Phase.GAME_END
 
     # ----- generic action envelope (BaseGame) ---------------------------

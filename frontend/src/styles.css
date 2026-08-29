@@ -1126,6 +1126,11 @@ body {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.75);
 }
+.bid-panel .panel-hint {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.55);
+}
 /* Suit icon buttons in the trump picker — same gold as the bid button so the
    black suits stay visible. Vertically ~25% shorter than a standard chip. */
 .chip.suit-chip {

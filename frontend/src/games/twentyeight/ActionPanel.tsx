@@ -68,6 +68,7 @@ function AuctionPanel({
 
   return (
     <div className="bid-panel">
+      <p className="panel-hint">Bid with your first 4 cards — the rest 4 come after trump is chosen.</p>
       {game.high_bid != null && (
         <p className="panel-title">
           Current bid <strong>{game.high_bid}</strong> — {nameOf(game, game.bidder_id)}
