@@ -113,7 +113,7 @@ def bot_play(game: "Game", player_id: str, rng: random.Random) -> tuple[str, dic
         return "play_card", {"card": _low(led_legal).to_dict()}
 
     # --- Void -------------------------------------------------------------
-    # Post-exposure forced overtrump shows up directly in legal_cards.
+    # The exposer's own must-play-trump obligation shows up in legal_cards.
     trump_cards = [c for c in legal if trump is not None and c.suit == trump]
     if aggressive and trump_cards and game.trump_exposed:
         already = [

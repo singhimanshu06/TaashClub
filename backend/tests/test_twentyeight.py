@@ -276,23 +276,43 @@ def test_mid_trick_exposure_trump_played_after_wins():
     assert g.last_trick_winner_seat == 3
 
 
-def test_post_exposure_must_overtrump_immediately_preceding_trump():
+def test_post_exposure_void_player_may_play_any_card():
     g = new_game()
     run_simple_auction(g)
     g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
-    g.trump_exposed = True                          # skip the trigger ceremony
+    g.trump_exposed = True                          # no exposure ceremony: no exposer obligation
     set_hand(g, 1, [card(13, Suit.HEART)])          # leads K♥
-    set_hand(g, 2, [card(9, Suit.SPADE)])           # void, trumps with 9♠
-    # Seat 3 holds only lower trump (7♠) plus junk -> must overtrump if able,
-    # and here he is able (holds J♠ alongside).
+    set_hand(g, 2, [card(9, Suit.SPADE)])           # void, plays 9♠
+    # Seat 3 is void too and free to play anything — even a LOWER trump
+    # (there is no overtrump obligation).
     set_hand(g, 3, [card(11, Suit.SPADE), card(7, Suit.SPADE)])
     set_hand(g, 0, [card(8, Suit.CLUB)])
     g.apply_action(pid(g, 1), "play_card", {"card": card(13, Suit.HEART).to_dict()})
     g.apply_action(pid(g, 2), "play_card", {"card": card(9, Suit.SPADE).to_dict()})
     legal3 = {c.label for c in g.legal_cards(pid(g, 3))}
-    assert legal3 == {"JS"}                         # 7♠ forbidden: overtrump!
-    g.apply_action(pid(g, 3), "play_card", {"card": card(11, Suit.SPADE).to_dict()})
+    assert legal3 == {"JS", "7S"}                   # both legal, no overtrump required
+    g.apply_action(pid(g, 3), "play_card", {"card": card(7, Suit.SPADE).to_dict()})
     g.apply_action(pid(g, 0), "play_card", {"card": card(8, Suit.CLUB).to_dict()})
+    assert g.last_trick_winner_seat == 2            # 9♠ is the highest trump
+
+
+def test_exposing_player_must_play_trump_if_holding_one():
+    g = new_game()
+    run_simple_auction(g)
+    g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
+    set_hand(g, 1, [card(13, Suit.HEART)])          # leads K♥
+    set_hand(g, 2, [card(8, Suit.CLUB)])            # void, discards
+    # Seat 3 is void in ♥, holds a trump alongside junk -> reveals and must
+    # then play trump; the club is forbidden.
+    set_hand(g, 3, [card(9, Suit.SPADE), card(8, Suit.CLUB)])
+    set_hand(g, 0, [card(10, Suit.HEART)])
+    g.apply_action(pid(g, 1), "play_card", {"card": card(13, Suit.HEART).to_dict()})
+    g.apply_action(pid(g, 2), "play_card", {"card": card(8, Suit.CLUB).to_dict()})
+    g.apply_action(pid(g, 3), "expose_trump")
+    legal3 = {c.label for c in g.legal_cards(pid(g, 3))}
+    assert legal3 == {"9S"}                         # must trump if able
+    g.apply_action(pid(g, 3), "play_card", {"card": card(9, Suit.SPADE).to_dict()})
+    g.apply_action(pid(g, 0), "play_card", {"card": card(10, Suit.HEART).to_dict()})
     assert g.last_trick_winner_seat == 3
 
 

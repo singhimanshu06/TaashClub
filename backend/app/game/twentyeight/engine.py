@@ -21,8 +21,8 @@ Rules implemented (original version):
   BEFORE the exposure in the current trick stay ordinary cards. The exposing
   player must play a trump on that trick if they hold one.
 - Post-exposure follow rules: follow suit if able; if void you may play
-  anything, but must overtrump a trump played after the exposure by the
-  immediately preceding player if possible.
+  anything. The only extra obligation sits with the exposer themself (see
+  below).
 - Highest trump wins the trick (post-exposure cards only), else the highest
   card of the led suit.
 - A deal ends early (at trick commit) once the opposition has captured more
@@ -273,10 +273,10 @@ class Game:
 
         Legal only for the player currently on turn who cannot follow the led
         suit (the original rule's trigger). From the next card onward the
-        revealed suit acts as trump for the rest of the deal; the caller must
+        revealed suit acts as trump for the rest of the deal; the exposer must
         play a trump on the current trick if they hold one (enforced by
-        legal_cards via the void check). Trump-suit cards already played to
-        this trick stay ordinary cards.
+        legal_cards), while other void players may play anything. Trump-suit
+        cards already played to this trick stay ordinary cards.
         """
         if self.phase != Phase.PLAYING:
             raise GameError("not in playing phase")
@@ -314,20 +314,13 @@ class Game:
             # Secret trump behaves like an ordinary suit — anything goes.
             return list(hand)
 
-        # Post-exposure: must overtrump the immediately preceding trump if
-        # able — but only when that trump was played AFTER the exposure
-        # (pre-exposure cards stay ordinary for the whole trick).
-        prev_idx = len(self.current_trick) - 1
-        exposed_here = self.expose_idx is None or prev_idx >= self.expose_idx
-        prev = self.current_trick[-1]["card"] if self.current_trick else None
-        if exposed_here and prev is not None and self.trump is not None and prev.suit == self.trump:
-            higher = [
-                c
-                for c in hand
-                if c.suit == self.trump and card_strength(c) > card_strength(prev)
-            ]
-            if higher:
-                return higher
+        # The player who just exposed trump must play a trump on this trick
+        # if they hold one (they are still on turn; exposure never advances
+        # it). Everyone else void in the led suit may play anything.
+        if self.expose_idx is not None and self.expose_idx == len(self.current_trick):
+            trumps = [c for c in hand if c.suit == self.trump]
+            if trumps:
+                return trumps
         return list(hand)
 
     def play_card(self, player_id: str, card: Card) -> None:
