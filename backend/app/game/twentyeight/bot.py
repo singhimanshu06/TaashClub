@@ -18,7 +18,16 @@ from ..base import Card, GameError, Phase, Suit
 if TYPE_CHECKING:
     from .engine import Game
 
-from .models import MAX_BID, MIN_BID, card_points, card_strength
+from .models import (
+    CARDS_PER_PLAYER,
+    FIRST_DEAL_COUNT,
+    MAX_BID,
+    MIN_BID,
+    NUM_PLAYERS,
+    TOTAL_CARD_POINTS,
+    card_points,
+    card_strength,
+)
 
 
 def _partner_seat(seat: int) -> int:
@@ -26,14 +35,25 @@ def _partner_seat(seat: int) -> int:
 
 
 def bot_bid(game: "Game", player_id: str, rng: random.Random) -> tuple[str, dict]:
-    """Heuristic bid: estimate capturable points from hand honours.
+    """Heuristic bid, made on the first half of the hand only.
 
-    The opener must open (>= 14). After that, raise to our estimate whenever
-    it clears the minimum raise (incl. the >= 20 partner-overcall rule),
-    otherwise pass.
+    Bidding happens before the second 4 cards are dealt, so the estimate
+    combines the visible honours, the statistical expectation of the cards
+    still to come, and a potential bonus for strong honours (J/9 likely win
+    tricks, A/10 are useful). The bot never peeks at its pending cards.
     """
     seat = game._seat_of(player_id)
-    estimate = sum(card_points(c) for c in game.players[seat].hand)
+    hand = game.players[seat].hand
+    visible = sum(card_points(c) for c in hand)
+    # The (NUM_PLAYERS * CARDS_PER_PLAYER - FIRST_DEAL_COUNT) cards we cannot
+    # see hold the rest of the deal's points; FIRST_DEAL_COUNT of them will
+    # land in our hand.
+    unknown_cards = NUM_PLAYERS * CARDS_PER_PLAYER - FIRST_DEAL_COUNT
+    expected_rest = (TOTAL_CARD_POINTS - visible) * FIRST_DEAL_COUNT / unknown_cards
+    potential = sum(
+        2 if c.rank in (11, 9) else 1 if c.rank in (14, 10) else 0 for c in hand
+    )
+    estimate = round(visible + expected_rest + potential)
     jitter = rng.choice([-1, 0, 0, 1])
 
     min_raise = max(MIN_BID, game._min_raise_for(seat))
@@ -48,7 +68,11 @@ def bot_bid(game: "Game", player_id: str, rng: random.Random) -> tuple[str, dict
 
 
 def bot_choose_trump(game: "Game", player_id: str) -> tuple[str, dict]:
-    """Pick the suit with the most honour points (length as tiebreaker)."""
+    """Pick the suit with the most honour points (length as tiebreaker).
+
+    Trump is named while the bidder still holds only the first 4 cards, so
+    the choice is based on those alone — same information a human has.
+    """
     hand = game._player_by_id(player_id).hand
     stats: dict[Suit, list[int]] = {}
     for c in hand:

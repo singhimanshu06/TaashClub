@@ -4,8 +4,10 @@ Played with a 32-card deck (7, 8, 9, 10, J, Q, K, A). Card strength for
 trick-taking is NOT the natural rank order: J > 9 > A > 10 > K > Q > 8 > 7.
 Point values captured in tricks: J=3, 9=2, A=1, 10=1; K/Q/8/7 = 0.
 
-Bids run from MIN_BID=14 to MAX_BID=28. Simple scoring: +1 per deal if the
-bidding partnership captures at least their bid, else -1.
+Bids run from MIN_BID=14 to MAX_BID=28 and are made on the first 4 cards of
+each hand; the remaining 4 are dealt once the winning bidder names trump.
+Simple scoring: +1 per deal if the bidding partnership captures at least
+their bid, else -1.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ GAME_TYPE = "twentyeight"
 
 NUM_PLAYERS = 4
 CARDS_PER_PLAYER = 8           # 32-card deck / 4 players
+FIRST_DEAL_COUNT = 4           # dealt before bidding; rest after trump is named
 MIN_RANK = 7                   # only 7 .. Ace are used
 MIN_BID = 14
 MAX_BID = 28

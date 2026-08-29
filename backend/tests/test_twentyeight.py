@@ -3,7 +3,7 @@ import random
 
 import pytest
 
-from app.game.base import Card, GameError, Phase, Player, Suit
+from app.game.base import Card, GameError, Phase, Player, Suit, hand_sort_key
 from app.game.registry import GAME_REGISTRY
 from app.game.twentyeight.bot import TwentyEightBotBrain
 from app.game.twentyeight.engine import Game
@@ -78,7 +78,32 @@ def test_deal_starts_with_opening_turn_at_seat_after_dealer():
     assert g.dealer_idx == 0
     assert g.turn_idx == 1
     for p in g.players:
-        assert len(p.hand) == 8
+        assert len(p.hand) == 4
+    # The held-back halves complete every seat to 8 cards with no overlap.
+    assert len(g.pending_cards) == 4
+    seen = []
+    for seat in range(4):
+        assert len(g.pending_cards[seat]) == 4
+        seen += g.players[seat].hand + g.pending_cards[seat]
+    assert len(seen) == 32
+    assert len({(c.suit, c.rank) for c in seen}) == 32
+
+
+def test_second_half_dealt_after_trump_is_named():
+    g = new_game()
+    run_simple_auction(g)
+    first_hands = [list(p.hand) for p in g.players]
+    pending = [list(cards) for cards in g.pending_cards]
+    g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
+    assert g.phase == Phase.PLAYING
+    assert g.pending_cards == []
+    for seat in range(4):
+        expected = sorted(first_hands[seat] + pending[seat], key=hand_sort_key)
+        assert g.players[seat].hand == expected
+        assert len(g.players[seat].hand) == 8
+    # The dealt halves are untouched by the second deal.
+    for seat in range(4):
+        assert set(first_hands[seat]) <= set(g.players[seat].hand)
 
 
 def test_opening_bid_is_mandatory_and_min_fourteen():

@@ -3,7 +3,7 @@ import type { GameInfo } from "../../types";
 const RULES = [
   "4 players, fixed partnerships (opposite seats). 32-card deck: 7 through Ace.",
   "Card ranking is unusual: J > 9 > A > 10 > K > Q > 8 > 7. Points: J=3, 9=2, A=1, 10=1 — 28 per deal.",
-  "Bid 14–28: the card points you promise your partnership will capture if you get to name trump. Opening bid is mandatory; passing locks you out; overcalling your partner needs ≥20.",
+  "Bid 14–28 on your first 4 cards (the remaining 4 are dealt after trump is named): the card points you promise your partnership will capture if you get to name trump. Opening bid is mandatory; passing locks you out; overcalling your partner needs ≥20.",
   "The winning bidder secretly names trump. Nobody sees it until it is revealed — the bidder can always see their own choice.",
   "Before the reveal, trump cards are ordinary cards and the bidder may not lead them.",
   "When a player who cannot follow suit reveals trump (or the bidder does), it becomes trump for the rest of the deal — the revealer must play trump on that trick if able.",
@@ -36,7 +36,7 @@ export default function TwentyEightHomeOptions({
         <div className="chip-row">
           <button className="chip active" disabled>
             4
-            <small>partners, 8 cards each</small>
+            <small>partners, 8 cards each — bid on your first 4</small>
           </button>
         </div>
       </div>
