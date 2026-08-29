@@ -12,6 +12,7 @@ registerGame("president", {
   StatusExtra: PresidentStatusExtra,
   ActionPanel: PresidentActionPanel,
   rendersOwnHand: true,
+  trickWraps: true,
   SeatStats: PresidentSeatStats,
   RoundResult: PresidentRoundResult,
   DetailedScores: PresidentDetailedScores,

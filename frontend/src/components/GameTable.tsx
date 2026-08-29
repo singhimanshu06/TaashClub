@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { CardT, GameState, StatePlayer } from "../types";
@@ -53,6 +54,47 @@ function Seat({
   );
 }
 
+/** The viewer's identity pill. Rendered in two spots (bottom of the table on
+ *  tall screens, next to the hand on short ones); CSS shows the right one. */
+function SelfChip({
+  me,
+  isMyTurn,
+  teamClass,
+  SelfStats,
+  game,
+  variant,
+}: {
+  me: StatePlayer;
+  isMyTurn: boolean;
+  teamClass: string;
+  SelfStats: ReturnType<typeof getGameSlots>["SelfStats"];
+  game: GameState;
+  variant: "table" | "strip";
+}) {
+  return (
+    <div className={`self-pos self-pos-${variant}${isMyTurn ? " seat-turn" : ""}`}>
+      <div className={`self-chip${teamClass}`}>
+        <span className="seat-avatar">{me.name.charAt(0).toUpperCase()}</span>
+        <span className="self-meta">
+          <span className="seat-label">{me.name} (you)</span>
+          <span className="seat-stats">
+            {SelfStats ? (
+              <SelfStats game={game} player={me} />
+            ) : (
+              me.bid !== null &&
+              me.bid !== undefined && (
+                <span className="your-stats">
+                  won {me.tricks_won} / bid {me.bid}
+                </span>
+              )
+            )}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function GameTable() {
   const { game, playerId, sendAction, reset } = useStore(
     useShallow((s) => ({
@@ -70,14 +112,16 @@ export default function GameTable() {
   const SelfStats = slots.SelfStats;
   const RoundResult = slots.RoundResult;
   const rendersOwnHand = slots.rendersOwnHand ?? false;
+  const trickWraps = slots.trickWraps ?? false;
 
   const me = game.players.find((p) => p.id === playerId);
   const isMyTurn = game.current_player_id === playerId;
   const nameById = (id: string) => game.players.find((p) => p.id === id)?.name ?? "";
 
   // Ring layout: everyone in play order (seat number ascending), viewer pinned
-  // bottom-center. Even spacing preserves turn order around the table and puts
-  // alternately-seated partners diametrically opposite in team games.
+  // bottom-center. Equal angular spacing puts neighbours equidistant from each
+  // other and from the table rim, preserves turn order around the ring, and
+  // seats partnership teammates opposite (4p) / alternating (6p) for free.
   const ordered = [...game.players].sort((a, b) => a.seat - b.seat);
   const viewerIndex = Math.max(
     ordered.findIndex((p) => p.id === playerId),
@@ -85,7 +129,7 @@ export default function GameTable() {
   );
   const seatPos = seatPositions(ordered.length, viewerIndex);
 
-  // Team tinting — inert until a future team game sends `teams`.
+  // Team tinting — inert until a team game sends `teams`.
   const teamClass = (id: string) => {
     const t = game.teams?.[id];
     return t != null ? ` team-${String(t).replace(/\W/g, "")}` : "";
@@ -134,6 +178,27 @@ export default function GameTable() {
   // nothing to avoid crashing on `me.name`.
   if (!me) return null;
 
+  const seatNode = (p: StatePlayer, i: number) => {
+    const isCurrent = game.current_player_id === p.id;
+    return (
+      <div
+        key={p.id}
+        className={`seat-pos seat-rim-${seatPos[i].rim}${isCurrent ? " seat-turn" : ""}`}
+        style={{ left: `${seatPos[i].left}%`, top: `${seatPos[i].top}%` }}
+      >
+        <Seat
+          p={p}
+          isCurrent={isCurrent}
+          isStarter={game.starter_id === p.id}
+          isWinner={game.awaiting_trick_clear && game.trick_winner_id === p.id}
+          phase={game.phase}
+          Stats={SeatStats ?? (() => null)}
+          game={game}
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="screen table-screen">
       {/* Top status bar: Scores (left) | round info (center) | Leave (right) */}
@@ -173,100 +238,93 @@ export default function GameTable() {
         </div>
       </div>
 
-      {/* Oval table: seats around the rim, trick in the center */}
+      {/* Ring table: seats equidistant around the rim (viewer bottom-center),
+          played cards in a centered row in the middle. */}
       <div className="table-stage">
-        <div className="felt">
-          {game.phase === "playing" && !game.awaiting_trick_clear && game.current_trick.length === 0 && (
-            <p className="felt-hint">
-              {isMyTurn ? "Your lead" : `${nameById(game.current_player_id ?? "")} to lead`}
-            </p>
-          )}
-          <div className="trick-area">
-            {game.current_trick.map((t, i) => {
-              const cards = trickCards(t);
-              return (
-                <div key={`${t.player_id}-${i}`} className="trick-slot">
-                  {cards.map((c, j) => (
-                    <PlayingCard
-                      key={j}
-                      card={c}
-                      size="md"
-                      highlight={game.awaiting_trick_clear && game.trick_winner_id === t.player_id}
-                    />
-                  ))}
-                  <span className="trick-owner">{nameById(t.player_id)}</span>
-                </div>
-              );
-            })}
-          </div>
-          {game.awaiting_trick_clear && game.trick_winner_id && (
-            <p className="felt-hint winner-banner">🏆 {nameById(game.trick_winner_id)} wins the trick</p>
-          )}
-          {game.phase === "bidding" && (
-            <p className="felt-hint">
-              {isMyTurn ? "Your turn to bid" : `${nameById(game.current_player_id ?? "")} is bidding…`}
-            </p>
-          )}
-          {game.phase === "exchange" && (
-            <p className="felt-hint">
-              Card exchange in progress…
-            </p>
-          )}
-          <SkipPopup game={game} nameById={nameById} />
-        </div>
+        <div className="table-mid">
+          <div className="felt" />
 
-        {/* Seats on the rim (positioned by play order; viewer bottom-center) */}
-        {ordered.map((p, i) =>
-          p.id === playerId ? null : (
-            <div
-              key={p.id}
-              className={`seat-pos${game.current_player_id === p.id ? " seat-pos-current" : ""}`}
-              style={{ left: `${seatPos[i].left}%`, top: `${seatPos[i].top}%` }}
-            >
-              <Seat
-                p={p}
-                isCurrent={game.current_player_id === p.id}
-                isStarter={game.starter_id === p.id}
-                isWinner={game.awaiting_trick_clear && game.trick_winner_id === p.id}
-                phase={game.phase}
-                Stats={SeatStats ?? (() => null)}
-                game={game}
-              />
-            </div>
-          )
-        )}
+          {/* Opponents on the ring (play order clockwise from the viewer) */}
+          {ordered.map((p, i) => (p.id === playerId ? null : seatNode(p, i)))}
 
-        {/* Viewer's own chip sits above the hand strip */}
-        <div
-          className={`seat-pos self-pos${isMyTurn ? " seat-pos-current" : ""}`}
-          style={{ left: "50%", top: "96%" }}
-        >
-          <div className={`self-chip${teamClass(playerId)}`}>
-            <span className="seat-avatar">{me.name.charAt(0).toUpperCase()}</span>
-            <span>{me.name} (you)</span>
-            {SelfStats ? (
-              <SelfStats game={game} player={me} />
-            ) : (
-              me.bid !== null &&
-              me.bid !== undefined && (
-                <span className="your-stats">
-                  won {me.tricks_won} / bid {me.bid}
-                </span>
-              )
+          {/* Status pill + played cards, stacked in the middle of the table */}
+          <div className="trick-col">
+            {game.phase === "playing" && !game.awaiting_trick_clear && game.current_trick.length === 0 && (
+              <p className="trick-hint">
+                {isMyTurn ? "Your lead" : `${nameById(game.current_player_id ?? "")} to lead`}
+              </p>
+            )}
+            {game.awaiting_trick_clear && game.trick_winner_id && (
+              <p className="trick-hint winner-banner">
+                🏆 {nameById(game.trick_winner_id)} wins the trick
+              </p>
+            )}
+            {game.phase === "bidding" && (
+              <p className="trick-hint">
+                {isMyTurn ? "Your turn to bid" : `${nameById(game.current_player_id ?? "")} is bidding…`}
+              </p>
+            )}
+            {game.phase === "exchange" && (
+              <p className="trick-hint">Card exchange in progress…</p>
+            )}
+            {game.current_trick.length > 0 && (
+              <div
+                className={`trick-row${trickWraps ? " trick-row-wrap" : ""}`}
+                style={{ "--n": game.current_trick.length } as CSSProperties}
+              >
+                {game.current_trick.map((t, i) => {
+                  const cards = trickCards(t);
+                  return (
+                    <div key={`${t.player_id}-${i}`} className="trick-slot">
+                      <div className="trick-cards">
+                        {cards.map((c, j) => (
+                          <PlayingCard
+                            key={j}
+                            card={c}
+                            size="md"
+                            highlight={game.awaiting_trick_clear && game.trick_winner_id === t.player_id}
+                          />
+                        ))}
+                      </div>
+                      <span className="trick-owner">{nameById(t.player_id)}</span>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
+
+          <SkipPopup game={game} nameById={nameById} />
+
+          {/* Viewer's own chip sits just below the table, top edge touching
+              the felt's bottom rim (tall screens; on short screens the copy
+              in the self-strip shows) */}
+          <SelfChip
+            me={me}
+            isMyTurn={isMyTurn}
+            teamClass={teamClass(playerId)}
+            SelfStats={SelfStats}
+            game={game}
+            variant="table"
+          />
         </div>
       </div>
 
-      {/* Your area */}
-      <div className={`your-area${isMyTurn ? " active" : ""}`}>
-        {/* Action panel (e.g. bid picker or combo selector) sits ABOVE the hand. */}
+      {/* Your area: action panel (bid picker / combo selector) above the hand.
+          Games whose ActionPanel renders its own Hand (President) set
+          rendersOwnHand so this doesn't render a second Hand. */}
+      <div className={`self-strip${isMyTurn ? " active" : ""}`}>
+        <SelfChip
+          me={me}
+          isMyTurn={isMyTurn}
+          teamClass={teamClass(playerId)}
+          SelfStats={SelfStats}
+          game={game}
+          variant="strip"
+        />
         {ActionPanel && (
           <ActionPanel game={game} isMyTurn={isMyTurn} sendAction={sendAction} />
         )}
-        {/* Hand: rendered by GameTable for games that use click-to-play (Callbreak).
-            Games whose ActionPanel renders its own Hand (President) set
-            rendersOwnHand to skip this. */}
         {!rendersOwnHand && (
           <Hand
             hand={me.hand ?? []}
@@ -277,39 +335,10 @@ export default function GameTable() {
       </div>
 
       {/* Overlays */}
-      <RotateHint active={game.num_players >= 5} />
       {game.phase === "round_end" && RoundResult && (
         <RoundResult game={game} sendAction={sendAction} />
       )}
       {game.phase === "game_end" && <GameOver game={game} />}
-    </div>
-  );
-}
-
-/**
- * Dismissible "rotate your phone" hint. Shown on portrait phones only when the
- * seat count is high enough that a landscape oval breathes better.
- */
-function RotateHint({ active }: { active: boolean }) {
-  const [dismissed, setDismissed] = useState(false);
-  const [portrait, setPortrait] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(orientation: portrait)").matches
-  );
-
-  useEffect(() => {
-    const mq = window.matchMedia("(orientation: portrait)");
-    const onChange = (e: MediaQueryListEvent) => setPortrait(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-
-  if (!active || dismissed || !portrait) return null;
-  return (
-    <div className="rotate-hint">
-      <span>↻ Rotate your phone for a better view</span>
-      <button onClick={() => setDismissed(true)} aria-label="Dismiss">
-        ×
-      </button>
     </div>
   );
 }

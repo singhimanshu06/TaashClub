@@ -25,8 +25,14 @@ export interface GameSlots {
   }>;
 
   /** True if the ActionPanel renders its own Hand (President). When false/absent
-   * the shared GameTable renders the Hand with click-to-play (Callbreak). */
+   *  the shared GameTable renders the Hand with click-to-play (Callbreak). */
   rendersOwnHand?: boolean;
+
+  /** True for games whose played-card pile grows until cleared (President):
+   *  the center card row wraps onto several lines instead of squeezing into
+   *  one. Trick-taking games (bounded slots) leave this unset and get a
+   *  single fitted row. */
+  trickWraps?: boolean;
 
   /** Per-seat stats line inside an opponent tile (e.g. "Bid 3 · Won 2"). */
   SeatStats?: ComponentType<{ game: GameState; player: StatePlayer; phase: string }>;

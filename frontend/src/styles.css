@@ -624,17 +624,26 @@ body {
   background: #fff;
   line-height: 0;
 }
+/* ---------- Fluid card sizing ----------
+ * Cards scale with the viewport (vmin = the smaller axis, so they stay modest
+ * in both portrait and landscape) instead of using fixed pixels that break
+ * small screens. md = played/trick cards, lg = hand cards. */
 .card-sm {
   width: 34px;
   height: 48px;
 }
+:root {
+  --card-ratio: 1.4;
+  --trick-card-w: clamp(40px, 11vmin, 64px);
+  --hand-card-w: clamp(50px, 14vmin, 84px);
+}
 .card-md {
-  width: 72px;
-  height: 100px;
+  width: var(--trick-card-w);
+  height: calc(var(--trick-card-w) * var(--card-ratio));
 }
 .card-lg {
-  width: 90px;
-  height: 126px;
+  width: var(--hand-card-w);
+  height: calc(var(--hand-card-w) * var(--card-ratio));
 }
 
 /* PNG image fills the card container completely */
@@ -653,6 +662,8 @@ body {
 }
 .card-playable:hover {
   transform: translateY(-16px);
+  /* Overlapping fan: the lifted card must clear its neighbours. */
+  z-index: 10;
 }
 .card-disabled {
   opacity: 0.5;
@@ -660,6 +671,7 @@ body {
 }
 .card-highlight {
   box-shadow: 0 0 0 3px var(--gold-bright), 0 0 22px rgba(233, 196, 106, 0.75);
+  z-index: 10;
 }
 
 /* ---------- Table ---------- */
@@ -674,7 +686,6 @@ body {
   grid-template-columns: 1fr minmax(0, auto) 1fr;
   align-items: start;
   gap: 10px;
-  margin-bottom: 12px;
 }
 .status-left,
 .status-right {
@@ -727,46 +738,98 @@ body {
   font-weight: 600;
 }
 
-/* ---------- Oval table ---------- */
+/* ---------- Stadium table (anchor-based) ----------
+ * Layout: seat tiles sit just OUTSIDE the table with their near edge
+ * touching the rim (top tiles above the table, side tiles beside it on wide
+ * screens), played cards in a centered row on the felt, and the viewer's
+ * chip just below the table. All sizes are fluid (vmin/clamp), so 4/5/6-
+ * player tables work from portrait phones up. */
+.table-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 12px 14px 14px;
+  gap: 8px;
+}
 .table-stage {
   position: relative;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
-  max-width: 960px;
-  min-height: 320px;
-  margin: 6px auto;
+  max-width: 1024px;
+  min-height: 0;
+  margin: 0 auto;
 }
+
+/* Middle zone: seats, felt and the card row are positioned inside this box. */
+.table-mid {
+  position: relative;
+  flex: 1;
+  min-height: clamp(200px, 36vh, 420px);
+}
+
+/* Decorative rectangular (stadium) felt inset to the seat rim: the insets
+ * mirror the rim constants in seating.ts (sides 10% ↔ RADIUS_X = 40, top/
+ * bottom 16% ↔ RADIUS_Y = 34), so the rim is exactly where seat tiles
+ * anchor — touching it from outside instead of sitting on the table.
+ * Diagonal seats (5-6 players) land just inside the corners. Positions are
+ * set independently of the felt, so its shape never drives layout. */
 .felt {
   position: absolute;
-  /* Inset the ellipse within the stage so it doesn't touch the status bar
-     above or the viewer's cards below. */
-  inset: 32px 48px;
+  inset: 16% 10%;
+  background: radial-gradient(ellipse at 50% 42%, var(--felt-1), var(--felt-2));
+  border: 8px solid var(--felt-edge);
+  border-radius: clamp(48px, 14vmin, 120px);
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5), 0 10px 40px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+/* Seats sit against the table rim: positions come from seating.ts (percent
+ * coordinates projected onto the rim). The rim class anchors the tile
+ * OUTSIDE the table with its near edge touching the rim. */
+.seat-pos {
+  position: absolute;
+  z-index: 6;
+}
+.seat-rim-top {
+  translate: -50% -100%; /* above the table, bottom edge on the rim */
+}
+.seat-rim-bottom {
+  translate: -50% 0; /* below the table, top edge on the rim */
+}
+.seat-rim-left {
+  translate: -100% -50%; /* left of the table, right edge on the rim */
+}
+.seat-rim-right {
+  translate: 0 -50%; /* right of the table, left edge on the rim */
+}
+/* Narrow screens have no room beside the table: side tiles straddle the rim
+ * (half on the table) instead of sitting outside it. */
+@media (max-width: 899px) {
+  .seat-rim-left,
+  .seat-rim-right {
+    translate: -50% -50%;
+  }
+}
+/* Lift the seat whose turn it is so its glow isn't clipped by neighbors */
+.seat-turn {
+  z-index: 8;
+}
+/* Seat tiles: compact TWO-LINE stack everywhere — line 1 the name, line 2
+ * the score/stats (extra text wraps onto a third line if needed) — narrow,
+ * so side tiles hugging the rim keep clear space for the central card row. */
+.seat-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 40px 72px;
-  background: radial-gradient(ellipse at center, var(--felt-1), var(--felt-2));
-  border: 10px solid var(--felt-edge);
-  border-radius: 50% / 50%;
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5), 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-.seat-pos {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  z-index: 5;
-}
-/* Lift the seat whose turn it is so highlight glow isn't clipped by neighbors */
-.seat-pos-current {
-  z-index: 7;
-}
-.seat-tile {
+  gap: 2px;
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  padding: 8px 10px;
-  min-width: 106px;
+  border-radius: 12px;
+  padding: 7px 6px;
   text-align: center;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -780,35 +843,54 @@ body {
 }
 .seat-head {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 2px;
 }
 .seat-avatar {
-  width: 28px;
-  height: 28px;
+  width: clamp(22px, 5vmin, 28px);
+  height: clamp(22px, 5vmin, 28px);
   flex-shrink: 0;
   border-radius: 50%;
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));
   color: var(--ink);
   font-weight: 800;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .seat-label {
   font-weight: 600;
-  font-size: 0.86rem;
+  font-size: clamp(0.72rem, 2vmin, 0.86rem);
+  max-width: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .starter-star {
   color: var(--gold-bright);
   margin-left: 4px;
 }
 .seat-stats {
-  font-size: 0.78rem;
+  font-size: clamp(0.66rem, 1.8vmin, 0.78rem);
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 2px;
+  max-width: 86px;
+  white-space: normal;
+}
+
+/* Wide screens: tiles stay two-line (never a single-line sprawl) — the
+ * avatar simply moves beside the name — and since side tiles now sit fully
+ * outside the table, the card row can spread wider between the rims. */
+@media (min-width: 900px) {
+  .seat-head {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .trick-col {
+    inset: 6% 16% 16% 16%;
+  }
 }
 
 /* Team tinting — inert until a game sends `teams`; key off avatar ring. */
@@ -829,53 +911,42 @@ body {
   box-shadow: 0 0 0 2px #ffa94d;
 }
 
-/* Viewer's own chip on the bottom rim of the oval */
-.self-pos {
-  z-index: 6;
+/* Viewer's own chip — a compact pill. On tall screens it sits just below the
+ * table with its top edge on the felt's bottom rim (mirrors the felt's 16%
+ * bottom inset); on short (landscape) screens the copy inside the self-strip
+ * shows instead, beside the hand, keeping the table zone clear. */
+.self-pos-table {
+  position: absolute;
+  left: 50%;
+  top: 84%;
+  translate: -50% 0;
+  z-index: 7;
+}
+.self-pos-strip {
+  display: none;
 }
 .self-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  padding: 5px 14px;
-  border-radius: 18px;
+  padding: 4px 14px 4px 5px;
+  border-radius: 999px;
   font-weight: 700;
   color: var(--gold-bright);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   white-space: nowrap;
+}
+.self-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  text-align: left;
 }
 .self-chip .your-stats {
   font-weight: 500;
-}
-
-/* Rotate-your-phone hint */
-.rotate-hint {
-  position: fixed;
-  top: 70px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--gold);
-  color: var(--gold-bright);
-  font-weight: 700;
-  font-size: 0.85rem;
-  padding: 8px 10px 8px 16px;
-  border-radius: 20px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
-}
-.rotate-hint button {
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 1.3rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 6px;
+  font-size: 0.72rem;
 }
 .bid-locked {
   color: var(--gold-bright);
@@ -885,15 +956,27 @@ body {
   color: var(--text);
 }
 
-.felt-hint {
+/* Center hint pill ("Your lead", winner banner, bidding status). Sits in the
+ * trick column above the card row — never on top of the cards. */
+.trick-hint {
+  margin: 0;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 16px;
+  border-radius: 999px;
   color: var(--gold-bright);
   font-weight: 600;
   letter-spacing: 0.4px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 3;
 }
 .winner-banner {
   color: #b8f5cf;
-  font-size: 1.15rem;
   font-weight: 800;
+  background: rgba(0, 0, 0, 0.55);
   animation: popIn 0.25s ease;
 }
 @keyframes popIn {
@@ -906,18 +989,73 @@ body {
     opacity: 1;
   }
 }
-.trick-area {
+
+/* Trick column: status pill + played cards, stacked and centered in the
+ * middle of the table. Horizontal insets keep the row clear of the ring
+ * seats hugging the left/right edges. */
+.trick-col {
+  position: absolute;
+  inset: 6% 23% 14% 23%;
   display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
+  z-index: 4;
+}
+
+/* Played cards in a centered ROW, in play order. The spacing per card
+ * (`--step`, count passed as `--n` from React) is computed from the
+ * container width, so up to 6 cards always fit in one row — cards overlap
+ * slightly when space is tight, edge to edge when it's plentiful. */
+.trick-row {
+  container-type: inline-size;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  --step: clamp(
+    calc(var(--trick-card-w) * 0.45),
+    calc((100cqw - var(--trick-card-w)) / (var(--n) - 1)),
+    calc(var(--trick-card-w) + 10px)
+  );
 }
 .trick-slot {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   animation: dealIn 0.2s ease;
+}
+.trick-slot + .trick-slot {
+  margin-left: calc(var(--step) - var(--trick-card-w));
+}
+.trick-cards {
+  display: flex;
+}
+/* Extra cards of a multi-card play overlap the first */
+.trick-cards .card + .card {
+  margin-left: calc(var(--trick-card-w) * -0.55);
+}
+.trick-owner {
+  font-size: 0.66rem;
+  color: var(--muted);
+  /* Never wider than the card, so edge labels can't reach the side seats */
+  max-width: var(--trick-card-w);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Games whose pile grows until cleared (President): the row wraps onto
+ * several centered lines instead of squeezing everything into one. */
+.trick-row-wrap {
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.trick-row-wrap .trick-slot + .trick-slot {
+  margin-left: 0;
 }
 @keyframes dealIn {
   from {
@@ -929,33 +1067,48 @@ body {
     opacity: 1;
   }
 }
-.trick-owner {
-  font-size: 0.75rem;
-  color: var(--muted);
-}
 
-.your-area {
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 12px 14px 16px;
-  margin-top: 6px;
+/* Slim strip under the table: action panel (bid picker etc.) + hand. */
+.self-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 1024px;
+  margin: 4px auto 0;
 }
-.your-area.active {
-  border-color: var(--gold-bright);
-  box-shadow: 0 0 22px rgba(233, 196, 106, 0.4);
+.self-strip.active {
+  border-radius: 16px;
+  box-shadow: 0 -8px 28px -10px rgba(233, 196, 106, 0.55);
 }
 .your-stats {
   color: var(--muted);
   font-weight: 500;
   font-size: 0.85rem;
 }
+
+/* Hand: single-row overlapping fan. The visible slice per card (`--step`)
+ * is computed from the container width and card count (set as `--n` from
+ * React), so 13 cards always fit on one row — from phones to desktop. On
+ * wide containers the fan spreads out until cards sit edge to edge. */
 .hand {
+  container-type: inline-size;
   display: flex;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 106px;
+  align-items: flex-end;
+  min-height: calc(var(--hand-card-w) * var(--card-ratio) + 20px);
+  padding: 4px 0 6px;
+  --step: clamp(
+    calc(var(--hand-card-w) * 0.24),
+    calc((100cqw - var(--hand-card-w)) / (var(--n) - 1)),
+    var(--hand-card-w)
+  );
+}
+.hand .card {
+  margin-left: calc(var(--step) - var(--hand-card-w));
+}
+.hand .card:first-child {
+  margin-left: 0;
 }
 
 /* ---------- Bid bar (sits above the hand, never over the cards) ---------- */
@@ -1467,37 +1620,24 @@ body {
 }
 
 @media (max-width: 640px) {
-  .table-stage {
-    min-height: 260px;
+  .table-screen {
+    padding: 8px 10px 12px;
+    gap: 6px;
   }
   .felt {
-    inset: 20px 26px;
-    padding: 26px 34px;
+    border-width: 6px;
   }
-  .card-lg {
-    width: 72px;
-    height: 100px;
-  }
-  .seat-tile {
-    min-width: 84px;
-    padding: 6px 7px;
-    border-radius: 11px;
-  }
+  /* Tiles are already compact by default; tighten a touch more */
   .seat-label {
-    font-size: 0.74rem;
-  }
-  .seat-avatar {
-    width: 24px;
-    height: 24px;
-    font-size: 0.72rem;
+    max-width: 64px;
   }
   .seat-stats {
-    font-size: 0.68rem;
+    max-width: 72px;
   }
-  .self-chip {
-    padding: 4px 10px;
-    font-size: 0.8rem;
-    gap: 6px;
+  .seat-avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 0.68rem;
   }
   .status-bar {
     gap: 6px;
@@ -1513,6 +1653,72 @@ body {
   .mute-btn {
     padding: 5px 8px;
     font-size: 0.92rem;
+  }
+}
+
+/* Very narrow phones: let trick cards shrink a bit more so the full row
+ * (up to 6 cards) fits between the side seats. */
+@media (max-width: 420px) {
+  :root {
+    --trick-card-w: clamp(30px, 11vmin, 64px);
+  }
+  .trick-col {
+    inset: 6% 25% 14% 25%;
+  }
+}
+
+/* Landscape phones / short viewports: compress the chrome, shrink cards,
+ * and swap the self chip into the strip next to the hand so the table zone
+ * stays clear. */
+@media (max-height: 520px) {
+  :root {
+    --trick-card-w: clamp(30px, 9vmin, 46px);
+    --hand-card-w: clamp(40px, 11vmin, 62px);
+  }
+  .table-screen {
+    padding: 6px 10px 10px;
+    gap: 4px;
+  }
+  .table-mid {
+    min-height: 0;
+  }
+  .felt {
+    border-width: 5px;
+  }
+  /* Short screens have no headroom above the table: top/bottom tiles
+   * straddle the rim instead of sitting outside it. */
+  .seat-rim-top,
+  .seat-rim-bottom {
+    translate: -50% -50%;
+  }
+  .trick-col {
+    inset: 2% 23% 6% 23%;
+    gap: 5px;
+  }
+  /* Chip swaps location: hide the felt-bottom copy, show the strip copy */
+  .self-pos-table {
+    display: none;
+  }
+  .self-pos-strip {
+    display: block;
+    flex: 0 0 auto;
+  }
+  .self-strip {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    margin-top: 0;
+  }
+  .self-strip .hand {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: calc(var(--hand-card-w) * var(--card-ratio) + 12px);
+  }
+  .self-strip .bid-panel,
+  .self-strip .president-panel {
+    margin-bottom: 0;
+    padding: 6px 10px;
+    flex: 0 1 auto;
   }
 }
 
