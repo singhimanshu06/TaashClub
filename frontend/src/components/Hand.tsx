@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import PlayingCard from "./PlayingCard";
 import type { CardT } from "../types";
 
@@ -24,8 +25,13 @@ function key(c: CardT) {
 export default function Hand({ hand, legal, onPlay, selectMode, selectedKeys, onToggle }: Props) {
   const legalSet = legal ? new Set(legal.map(key)) : null;
 
+  // Card count drives the CSS overlap math (see `.hand` in styles.css): the
+  // visible slice per card shrinks just enough that every card fits in ONE
+  // row at any screen width.
+  const style = { "--n": Math.max(hand.length, 2) } as CSSProperties;
+
   return (
-    <div className="hand">
+    <div className="hand" style={style}>
       {hand.map((c) => {
         const k = key(c);
         const isLegal = legalSet ? legalSet.has(k) : false;
