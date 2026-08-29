@@ -71,6 +71,10 @@ async def main():
     try:
         raw = await asyncio.wait_for(ws.recv(), timeout=5)
         msg = json.loads(raw)
+        # Connect now emits a player_status banner event before anything else.
+        if msg.get("type") == "player_status":
+            raw = await asyncio.wait_for(ws.recv(), timeout=5)
+            msg = json.loads(raw)
         if msg.get("type") == "chat_history":
             raw = await asyncio.wait_for(ws.recv(), timeout=5)
             msg = json.loads(raw)

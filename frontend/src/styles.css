@@ -1852,3 +1852,26 @@ body {
   padding: 1px 6px;
   border-radius: 5px;
 }
+
+/* ---------- Player connect/disconnect banner (top-center of the table) ---------- */
+.player-banner {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 700;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  pointer-events: none;
+  animation: skipPopupIn 0.25s ease;
+  white-space: nowrap;
+}
+.player-banner.off {
+  background: rgba(214, 40, 40, 0.95);
+}
+.player-banner.on {
+  background: rgba(42, 157, 90, 0.95);
+}

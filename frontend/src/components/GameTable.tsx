@@ -7,6 +7,7 @@ import PlayingCard from "./PlayingCard";
 import Hand from "./Hand";
 import GameOver from "./GameOver";
 import Scorecard from "./Scorecard";
+import PlayerBanner from "./PlayerBanner";
 import { getGameSlots } from "../games/registry";
 import { seatPositions } from "../table/seating";
 import { playSound, isMuted, setMuted } from "../sounds";
@@ -201,6 +202,7 @@ export default function GameTable() {
 
   return (
     <div className="screen table-screen">
+      <PlayerBanner />
       {/* Top status bar: Scores (left) | round info (center) | Leave (right) */}
       <div className="status-bar">
         <div className="status-left">

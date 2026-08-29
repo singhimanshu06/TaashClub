@@ -33,7 +33,7 @@ BOT_AUTO_ADVANCE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_AUTO_ADVANCE", "6
 # How long to wait after a player disconnects before converting their seat to a
 # bot (so the game continues for everyone else). If they reconnect before this
 # fires, the conversion is cancelled.
-BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_CONVERSION_GRACE", "30"))
+BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_CONVERSION_GRACE", "60"))
 
 app = FastAPI(title="TaashClub")
 
@@ -112,6 +112,8 @@ async def game_socket(ws: WebSocket, code: str, player_id: str):
         if p.id == player_id:
             p.is_bot = False
 
+    await _broadcast_player_status(room, player_id, True)
+
     await connections.send_to(room, player_id, {"type": "chat_history", "messages": room.chat_log})
     await _after_state_change(room)
 
@@ -121,6 +123,7 @@ async def game_socket(ws: WebSocket, code: str, player_id: str):
             await handle_event(room, player_id, msg)
     except WebSocketDisconnect:
         connections.disconnect(room, player_id)
+        await _broadcast_player_status(room, player_id, False)
         _schedule_conversion_if_needed(room, player_id)
         await _after_state_change(room)
 
@@ -284,6 +287,18 @@ def _cancel_auto_advance(room: Room) -> None:
     for t in list(room._bot_tasks):
         if not t.done() and "auto_advance" in getattr(t.get_coro(), "__qualname__", ""):
             t.cancel()
+
+
+async def _broadcast_player_status(room: Room, player_id: str, connected: bool) -> None:
+    player = next((p for p in room.players if p.id == player_id), None)
+    if player is None:
+        return
+    await connections.broadcast(room, {
+        "type": "player_status",
+        "player_id": player_id,
+        "name": player.name,
+        "connected": connected,
+    })
 
 
 def _schedule_conversion_if_needed(room: Room, player_id: str) -> None:
