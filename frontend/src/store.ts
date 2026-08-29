@@ -24,6 +24,7 @@ interface Store {
   reconnecting: boolean;
   reconnectAttempt: number; // 0 when idle, 1..N when retrying
   messages: ChatMessage[];
+  playerBanner: { name: string; connected: boolean; ts: number } | null;
 
   enterRoom: (code: string, playerId: string) => void;
   reconnect: () => void;
@@ -33,6 +34,7 @@ interface Store {
   sendAction: (action: string, params?: Record<string, unknown>) => void;
   sendChat: (text: string) => void;
   clearError: () => void;
+  clearPlayerBanner: () => void;
   reset: () => void;
 }
 
@@ -85,6 +87,10 @@ function handleMessage(set: (partial: Partial<Store> | ((s: Store) => Partial<St
     set({ messages: msg.messages as ChatMessage[] });
   } else if (msg.type === "chat") {
     set((s) => ({ messages: [...s.messages, msg.message as ChatMessage] }));
+  } else if (msg.type === "player_status") {
+    set({
+      playerBanner: { name: msg.name as string, connected: !!msg.connected, ts: Date.now() },
+    });
   } else if (msg.type === "error") {
     set({ error: msg.message });
   }
@@ -196,6 +202,7 @@ export const useStore = create<Store>((set, get) => ({
   reconnecting: false,
   reconnectAttempt: 0,
   messages: [],
+  playerBanner: null,
 
   enterRoom: (code, playerId) => {
     saveSession(code, playerId);
@@ -229,6 +236,7 @@ export const useStore = create<Store>((set, get) => ({
     if (t) send({ type: "chat", text: t });
   },
   clearError: () => set({ error: null }),
+  clearPlayerBanner: () => set({ playerBanner: null }),
   reset: () => {
     intendedClose = true;
     if (reconnectTimer) {
@@ -250,6 +258,7 @@ export const useStore = create<Store>((set, get) => ({
       reconnecting: false,
       reconnectAttempt: 0,
       messages: [],
+      playerBanner: null,
     });
   },
 }));
