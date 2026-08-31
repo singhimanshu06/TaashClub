@@ -20,14 +20,14 @@ Rules implemented (original version):
   the bidder, who may lead it): highest card of the led suit wins.
 - Exposure: any player who is on turn, void in the led suit (the bidder
   included) may expose trump via ``expose_trump``. From that moment trumps
-  behave normally for the REST of the deal — cards of the trump suit played
-  BEFORE the exposure in the current trick stay ordinary cards. The exposing
-  player must play a trump on that trick if they hold one.
+  behave normally for the REST of the deal. The exposing player must play a
+  trump on that trick if they hold one.
 - Post-exposure follow rules: follow suit if able; if void you may play
   anything. The only extra obligation sits with the exposer themself (see
   below).
-- Highest trump wins the trick (post-exposure cards only), else the highest
-  card of the led suit.
+- From the trick in which trump is exposed onward, the highest trump wins the
+  trick — including trump-suit cards played before the exposure within that
+  same trick. Otherwise the highest card of the led suit wins.
 - A deal ends early (at trick commit) once the opposition has captured more
   than ``TOTAL_CARD_POINTS - bid`` points: the bidder's partnership can no
   longer reach the bid, so the result is decided.
@@ -292,11 +292,12 @@ class Game:
         """        Reveal the hidden trump suit mid-deal.
 
         Legal only for the player currently on turn who cannot follow the led
-        suit (the original rule's trigger). From the next card onward the
-        revealed suit acts as trump for the rest of the deal; the exposer must
-        play a trump on the current trick if they hold one (enforced by
-        legal_cards), while other void players may play anything. Trump-suit
-        cards already played to this trick stay ordinary cards.
+        suit (the original rule's trigger). From this trick onward the
+        revealed suit acts as trump for the rest of the deal; trump-suit
+        cards already played to this trick count as trumps when the trick is
+        decided. The exposer must play a trump on the current trick if they
+        hold one (enforced by legal_cards), while other void players may play
+        anything.
         """
         if self.phase != Phase.PLAYING:
             raise GameError("not in playing phase")
@@ -401,11 +402,13 @@ class Game:
         led = self.led_suit
         trump_pool = []
         if self.trump_exposed and self.trump is not None:
-            first_trump_idx = self.expose_idx if self.expose_idx is not None else 0
-            trump_pool = [
-                e for i, e in enumerate(trick)
-                if i >= first_trump_idx and e["card"].suit == self.trump
-            ]
+            # From the trick in which trump is exposed onward, the highest
+            # trump wins — including trump-suit cards played before the
+            # exposure within this same trick (they were ordinary cards when
+            # played, but the exposure retro-activates trump for the whole
+            # trick). Before that trick, exposure_idx is None and every card
+            # of the (now revealed) trump suit counts.
+            trump_pool = [e for e in trick if e["card"].suit == self.trump]
         if trump_pool:
             best = max(trump_pool, key=lambda e: card_strength(e["card"]))
         else:
