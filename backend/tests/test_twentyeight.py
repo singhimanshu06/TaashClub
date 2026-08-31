@@ -266,12 +266,12 @@ def test_pre_exposure_trick_won_by_led_suit_even_with_trump_discards():
 
 
 # --- exposure ---------------------------------------------------------------
-def test_mid_trick_exposure_no_retroactive_trump_for_pre_exposure_cards():
+def test_mid_trick_exposure_pre_exposure_trump_still_wins():
     g = new_game()
     run_simple_auction(g)
     g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
     set_hand(g, 1, [card(10, Suit.HEART)])
-    set_hand(g, 2, [card(11, Suit.SPADE)])          # pre-exposure discard of trump suit
+    set_hand(g, 2, [card(11, Suit.SPADE)])          # trump-suit discard before exposure
     set_hand(g, 3, [card(8, Suit.CLUB)])            # void in ♥ -> reveals
     set_hand(g, 0, [card(14, Suit.HEART)])
     g.apply_action(pid(g, 1), "play_card", {"card": card(10, Suit.HEART).to_dict()})
@@ -280,8 +280,27 @@ def test_mid_trick_exposure_no_retroactive_trump_for_pre_exposure_cards():
     assert g.trump_exposed
     g.apply_action(pid(g, 3), "play_card", {"card": card(8, Suit.CLUB).to_dict()})
     g.apply_action(pid(g, 0), "play_card", {"card": card(14, Suit.HEART).to_dict()})
-    # J♠ was played BEFORE exposure -> stays an ordinary spade; A♥ wins.
-    assert g.last_trick_winner_seat == 0
+    # Exposure happened in this trick: J♠ counts as trump even though it was
+    # played BEFORE the reveal — highest trump wins, beating A♥.
+    assert g.last_trick_winner_seat == 2
+
+
+def test_mid_trick_exposure_exposers_low_trump_loses_to_higher_pre_exposure_trump():
+    g = new_game()
+    run_simple_auction(g)
+    g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
+    set_hand(g, 1, [card(14, Suit.HEART)])          # leads A♥
+    set_hand(g, 2, [card(9, Suit.SPADE)])           # trump-suit discard before exposure
+    set_hand(g, 3, [card(7, Suit.SPADE)])           # void in ♥ -> reveals, must trump
+    set_hand(g, 0, [card(10, Suit.HEART)])
+    g.apply_action(pid(g, 1), "play_card", {"card": card(14, Suit.HEART).to_dict()})
+    g.apply_action(pid(g, 2), "play_card", {"card": card(9, Suit.SPADE).to_dict()})
+    g.apply_action(pid(g, 3), "expose_trump")
+    g.apply_action(pid(g, 3), "play_card", {"card": card(7, Suit.SPADE).to_dict()})
+    g.apply_action(pid(g, 0), "play_card", {"card": card(10, Suit.HEART).to_dict()})
+    # 9♠ played before the reveal still counts as trump; the exposer's 7♠
+    # cannot beat it.
+    assert g.last_trick_winner_seat == 2
 
 
 def test_mid_trick_exposure_trump_played_after_wins():
