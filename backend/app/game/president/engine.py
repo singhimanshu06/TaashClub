@@ -9,7 +9,9 @@ Key concepts:
 - Players must follow the led combo's *size* with cards of >= rank, or pass.
 - A single 2 is a "bomb": it clears the pile and the bomber leads a fresh combo.
 - If two consecutive plays (ignoring passes) are the same rank+size where the
-  size is 1 or 2, the next player is skipped for the current combo.
+  size is 1 or 2, the next player is skipped for the current combo. When the
+  skip leaves nobody but the last player to act (e.g. the two-player endgame),
+  the combo is uncontested: the pile clears and that player leads fresh.
 - A round ends when one player has cards left (the Asshole). Roles are assigned
   by finishing order and scored. Rounds 2+ start with an exchange where the
   Asshole/Vice-Asshole give their highest cards to the President/VP, who then
@@ -94,13 +96,16 @@ class Game:
         return [p.join_order for p in self.players if p.hand]
 
     def _next_active_seat_after(self, seat: int) -> Optional[int]:
+        """Next seat (cyclic seat order) after `seat` that still holds cards.
+
+        Strict clockwise succession: works whether `seat` is still active or
+        has already finished (the first active seat cyclically after it).
+        """
         active = self._active_seats()
         if not active:
             return None
-        if seat in active:
-            idx = active.index(seat)
-            return active[(idx + 1) % len(active)]
-        return active[0]
+        after = [s for s in active if s > seat]
+        return after[0] if after else active[0]
 
     # ----- lifecycle -----------------------------------------------------
     def start(self) -> None:
@@ -247,7 +252,12 @@ class Game:
 
         # Skip detection: if this play's (rank, size) equals the immediately
         # previous play's (rank, size) and size is 1 or 2, skip the next player.
+        # If the skip leaves nobody but this player able to act on the combo
+        # (e.g. the two-player endgame), the combo is uncontested: the pile
+        # clears and this player leads fresh (same as everyone passing),
+        # instead of being left to follow their own combo forever.
         self.last_play_ranks.append((rank, size))
+        uncontested = False
         if len(self.last_play_ranks) >= 2 and size in (1, 2):
             prev = self.last_play_ranks[-2]
             cur = self.last_play_ranks[-1]
@@ -255,12 +265,23 @@ class Game:
                 nxt = self._next_active_seat_after(seat)
                 if nxt is not None:
                     self.skip_until_clear.add(nxt)
+                    if not any(
+                        s != seat and s not in self.skip_until_clear
+                        for s in self._active_seats()
+                    ):
+                        self.pile_top = None
+                        self.current_trick = []
+                        self.last_play_ranks = []
+                        self.skip_until_clear = set()
+                        self.passes_this_combo = set()
+                        uncontested = True
 
         if not player.hand:
             self._mark_finished(seat)
             self._advance_after_finish()
-        else:
+        elif not uncontested:
             self._advance_turn()
+        # uncontested with cards left: turn unchanged, this player leads fresh
 
     def _pass(self, player_id: str) -> None:
         if self.phase != Phase.PLAYING:
@@ -297,21 +318,23 @@ class Game:
         self._advance_turn()
 
     def _advance_turn(self) -> None:
+        """Pass the turn strictly clockwise (cyclic seat order), passing over
+        finished seats and seats skipped for the current combo."""
         active = self._active_seats()
         if not active:
             return
-        if self.turn_idx not in active:
-            self.turn_idx = active[0]
-        idx = active.index(self.turn_idx)
+        cursor = self.turn_idx  # may be a seat that just finished
         for _ in range(len(active)):
-            idx = (idx + 1) % len(active)
-            seat = active[idx]
-            if seat not in self.skip_until_clear:
-                self.turn_idx = seat
+            cursor = self._next_active_seat_after(cursor)
+            if cursor is not None and cursor not in self.skip_until_clear:
+                self.turn_idx = cursor
                 return
-        # All remaining active seats are skipped — clear skips and advance.
+        # All remaining active seats are skipped — burn the skips; the next
+        # clockwise seat acts.
         self.skip_until_clear = set()
-        self.turn_idx = active[(active.index(self.turn_idx) + 1) % len(active)]
+        cursor = self._next_active_seat_after(cursor)
+        if cursor is not None:
+            self.turn_idx = cursor
 
     def _mark_finished(self, seat: int) -> None:
         """Record a player as having emptied their hand this round."""
