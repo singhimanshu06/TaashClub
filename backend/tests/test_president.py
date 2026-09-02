@@ -183,6 +183,95 @@ def test_skip_on_consecutive_same_rank_singles():
     assert c_seat in g.skip_until_clear
 
 
+def test_two_players_left_same_rank_skips_and_clears():
+    """Regression: with two players left, a matching single skips the only
+    opponent and the combo is uncontested — the pile must clear and the last
+    player leads fresh (previously the pile could never clear and the game
+    stuck on the same player's turn)."""
+    g = new_game(seed=3)
+    # Only players 0 and 1 still hold cards.
+    set_hand(g, "p0", [card(6), card(10)])
+    set_hand(g, "p1", [card(6), card(4), card(3)])
+    set_hand(g, "p2", [])
+    set_hand(g, "p3", [])
+    set_hand(g, "p4", [])
+    g.turn_idx = 0
+    # p0 leads a single 6; p1 matches with a single 6.
+    g.apply_action("p0", "play_combo", {"cards": [card(6).to_dict()]})
+    g.apply_action("p1", "play_combo", {"cards": [card(6).to_dict()]})
+    # p0 skipped -> nobody left to contest: pile clears, p1 leads fresh.
+    assert g.pile_top is None
+    assert g.skip_until_clear == set()
+    assert g.turn_idx == 1
+    # Normal two-player flow continues.
+    g.apply_action("p1", "play_combo", {"cards": [card(4).to_dict()]})
+    assert g.pile_top["rank"] == 4
+    assert g.turn_idx == 0
+    # p0 overtakes with their last card -> finishes; round ends.
+    g.apply_action("p0", "play_combo", {"cards": [card(10).to_dict()]})
+    assert g.phase == Phase.ROUND_END
+
+
+def test_uncontested_skip_clears_pile_last_player_leads():
+    """A skip that leaves only the last player able to act ends the combo:
+    pile clears and the last player leads fresh."""
+    g = new_game(seed=3)
+    set_hand(g, "p0", [card(5), card(5), card(9)])
+    set_hand(g, "p1", [card(5), card(8)])
+    set_hand(g, "p2", [card(4)])
+    set_hand(g, "p3", [])
+    set_hand(g, "p4", [])
+    g.turn_idx = 0
+    g.apply_action("p0", "play_combo", {"cards": [card(5).to_dict()]})
+    g.apply_action("p1", "play_combo", {"cards": [card(5).to_dict()]})
+    # p2 is skipped by the p0/p1 match; p0 gets the turn (p2 can no longer
+    # contest this combo).
+    assert g.skip_until_clear == {2}
+    assert g.turn_idx == 0
+    # p0 matches again -> skipping p1 leaves nobody to contest: pile clears
+    # and p0 leads fresh.
+    g.apply_action("p0", "play_combo", {"cards": [card(5).to_dict()]})
+    assert g.pile_top is None
+    assert g.skip_until_clear == set()
+    assert g.turn_idx == 0
+    # p0 leads their remaining card; flow continues normally.
+    g.apply_action("p0", "play_combo", {"cards": [card(9).to_dict()]})
+    assert g.pile_top["rank"] == 9
+    assert g.turn_idx == 1
+
+
+def test_finish_passes_lead_clockwise_not_lowest_seat():
+    """After a player finishes, the lead goes to the next seat clockwise from
+    the finisher — not the lowest active seat."""
+    g = new_game(seed=3)
+    set_hand(g, "p0", [card(9), card(10)])
+    set_hand(g, "p1", [])
+    set_hand(g, "p2", [card(6)])
+    set_hand(g, "p3", [])
+    set_hand(g, "p4", [card(8)])
+    g.turn_idx = 2
+    # p2 leads their last card and finishes (seats 0, 2, 4 held cards).
+    g.apply_action("p2", "play_combo", {"cards": [card(6).to_dict()]})
+    # Next clockwise after seat 2 is seat 4 (not the lowest seat 0).
+    assert g.turn_idx == 4
+
+
+def test_finish_wraps_clockwise():
+    """When the finisher is the highest active seat, the lead wraps to the
+    lowest active seat."""
+    g = new_game(seed=3)
+    set_hand(g, "p0", [card(9), card(10)])
+    set_hand(g, "p1", [])
+    set_hand(g, "p2", [])
+    set_hand(g, "p3", [card(8)])
+    set_hand(g, "p4", [card(6)])
+    g.turn_idx = 4
+    # p4 leads their last card and finishes.
+    g.apply_action("p4", "play_combo", {"cards": [card(6).to_dict()]})
+    # Next clockwise after seat 4 wraps around to seat 0.
+    assert g.turn_idx == 0
+
+
 # --- round end & scoring ------------------------------------------------
 def test_round_ends_when_one_player_has_cards():
     g = new_game(rounds=5, seed=5)
