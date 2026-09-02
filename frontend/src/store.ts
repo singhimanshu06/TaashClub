@@ -9,14 +9,22 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 1000; // 1s, 2s, 4s, 8s, 16s
 
 interface Session {
+  role: "player" | "spectator";
   code: string;
-  playerId: string;
+  playerId?: string;
+  spectatorId?: string;
+  chatId?: string;
+  spectatorName?: string;
 }
 
 interface Store {
   screen: Screen;
   code: string | null;
+  role: "player" | "spectator" | null;
   playerId: string | null;
+  spectatorId: string | null;
+  chatId: string | null;
+  spectatorName: string | null;
   lobby: Lobby | null;
   game: GameState | null;
   error: string | null;
@@ -27,6 +35,7 @@ interface Store {
   playerBanner: { name: string; connected: boolean; ts: number } | null;
 
   enterRoom: (code: string, playerId: string) => void;
+  enterSpectator: (code: string, spectatorId: string, chatId: string, name: string) => void;
   reconnect: () => void;
   startGame: () => void;
   addBot: () => void;
@@ -52,9 +61,9 @@ function send(msg: object) {
   }
 }
 
-function saveSession(code: string, playerId: string) {
+function saveSession(session: Session) {
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId }));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
     // localStorage may be unavailable (private mode); reconnection just won't persist.
   }
@@ -64,8 +73,19 @@ function loadSession(): Session | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const s = JSON.parse(raw) as Session;
-    return s.code && s.playerId ? s : null;
+    const s = JSON.parse(raw) as Partial<Session> & { code?: string; playerId?: string };
+    // Accept the pre-spectator session shape so existing players can reload.
+    if (s.role === "spectator" && s.code && s.spectatorId && s.chatId && s.spectatorName) {
+      return {
+        role: "spectator",
+        code: s.code,
+        spectatorId: s.spectatorId,
+        chatId: s.chatId,
+        spectatorName: s.spectatorName,
+      };
+    }
+    if (s.code && s.playerId) return { role: "player", code: s.code, playerId: s.playerId };
+    return null;
   } catch {
     return null;
   }
@@ -112,8 +132,7 @@ function handleMessage(set: (partial: Partial<Store> | ((s: Store) => Partial<St
 function openSocket(
   set: (partial: Partial<Store> | ((s: Store) => Partial<Store>)) => void,
   get: () => Store,
-  code: string,
-  playerId: string,
+  session: Session,
   onOpenExtra?: () => void,
 ) {
   if (socket) {
@@ -128,7 +147,10 @@ function openSocket(
   }
   reconnectAttempts = 0;
 
-  socket = new WebSocket(`${WS_BASE}/ws/${code}?player_id=${playerId}`);
+  const query = session.role === "player"
+    ? `player_id=${encodeURIComponent(session.playerId!)}`
+    : `spectator_id=${encodeURIComponent(session.spectatorId!)}`;
+  socket = new WebSocket(`${WS_BASE}/ws/${encodeURIComponent(session.code)}?${query}`);
 
   socket.onopen = () => {
     reconnectAttempts = 0;
@@ -140,18 +162,32 @@ function openSocket(
     set({ connected: false });
     if (intendedClose) return; // we closed it on purpose (reset/leave)
 
-    // 4004 = room gone, 4003 = player invalid — session is dead, give up.
-    if (ev.code === 4004 || ev.code === 4003) {
+    // Invalid room/session and the spectator capacity limit are terminal for
+    // this browser session. The user can start a fresh watch attempt.
+    if (ev.code === 4004 || ev.code === 4003 || ev.code === 4005 || ev.code === 4008 || ev.code === 4009) {
       clearSession();
       set({
         screen: "home",
         code: null,
+        role: null,
         playerId: null,
+        spectatorId: null,
+        chatId: null,
+        spectatorName: null,
         lobby: null,
         game: null,
         reconnecting: false,
         reconnectAttempt: 0,
-        error: ev.code === 4004 ? "Your game has ended." : "You are no longer in this room.",
+        error:
+          ev.code === 4004
+            ? "Your game has ended."
+            : ev.code === 4008
+              ? "This room already has 10 spectators."
+              : ev.code === 4009
+                ? "This spectator session was opened elsewhere."
+                : session.role === "spectator"
+                  ? "Your spectator session has expired."
+                  : "You are no longer in this room.",
       });
       socket = null;
       return;
@@ -176,7 +212,11 @@ function scheduleReconnect(
     set({
       screen: "home",
       code: null,
+      role: null,
       playerId: null,
+      spectatorId: null,
+      chatId: null,
+      spectatorName: null,
       lobby: null,
       game: null,
       reconnecting: false,
@@ -200,14 +240,18 @@ function scheduleReconnect(
       set({ screen: "home", reconnecting: false, reconnectAttempt: 0 });
       return;
     }
-    openSocket(set, get, session.code, session.playerId);
+    openSocket(set, get, session);
   }, delay);
 }
 
 export const useStore = create<Store>((set, get) => ({
   screen: "home",
   code: null,
+  role: null,
   playerId: null,
+  spectatorId: null,
+  chatId: null,
+  spectatorName: null,
   lobby: null,
   game: null,
   error: null,
@@ -218,10 +262,47 @@ export const useStore = create<Store>((set, get) => ({
   playerBanner: null,
 
   enterRoom: (code, playerId) => {
-    saveSession(code, playerId);
+    const session: Session = { role: "player", code, playerId };
+    saveSession(session);
     disconnectedPlayers.clear();
-    set({ code, playerId, screen: "lobby", messages: [], reconnecting: false, reconnectAttempt: 0 });
-    openSocket(set, get, code, playerId);
+    set({
+      code,
+      role: "player",
+      playerId,
+      spectatorId: null,
+      chatId: null,
+      spectatorName: null,
+      screen: "lobby",
+      messages: [],
+      reconnecting: false,
+      reconnectAttempt: 0,
+    });
+    openSocket(set, get, session);
+  },
+
+  enterSpectator: (code, spectatorId, chatId, name) => {
+    const session: Session = {
+      role: "spectator",
+      code,
+      spectatorId,
+      chatId,
+      spectatorName: name,
+    };
+    saveSession(session);
+    disconnectedPlayers.clear();
+    set({
+      code,
+      role: "spectator",
+      playerId: null,
+      spectatorId,
+      chatId,
+      spectatorName: name,
+      screen: "lobby",
+      messages: [],
+      reconnecting: false,
+      reconnectAttempt: 0,
+    });
+    openSocket(set, get, session);
   },
 
   reconnect: () => {
@@ -232,13 +313,17 @@ export const useStore = create<Store>((set, get) => ({
     }
     set({
       code: session.code,
-      playerId: session.playerId,
+      role: session.role,
+      playerId: session.playerId ?? null,
+      spectatorId: session.spectatorId ?? null,
+      chatId: session.chatId ?? null,
+      spectatorName: session.spectatorName ?? null,
       screen: "reconnecting",
       reconnecting: true,
       reconnectAttempt: 1,
     });
     reconnectAttempts = 1;
-    openSocket(set, get, session.code, session.playerId);
+    openSocket(set, get, session);
   },
 
   startGame: () => send({ type: "start_game" }),
@@ -264,7 +349,11 @@ export const useStore = create<Store>((set, get) => ({
     set({
       screen: "home",
       code: null,
+      role: null,
       playerId: null,
+      spectatorId: null,
+      chatId: null,
+      spectatorName: null,
       lobby: null,
       game: null,
       error: null,
@@ -283,7 +372,7 @@ if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     const state = useStore.getState();
-    if (!state.code || !state.playerId) return; // no session to restore
+    if (!state.code || (!state.playerId && !state.spectatorId)) return; // no session to restore
     if (socket && socket.readyState === WebSocket.OPEN) return; // already connected
     if (intendedClose) return; // user left on purpose
     // Reset attempt counter so a fresh page-focus gets a clean retry sequence.
@@ -294,6 +383,7 @@ if (typeof document !== "undefined") {
     }
     useStore.setState({ reconnecting: true, reconnectAttempt: 1 });
     reconnectAttempts = 1;
-    openSocket(useStore.setState, useStore.getState, state.code, state.playerId);
+    const session = loadSession();
+    if (session) openSocket(useStore.setState, useStore.getState, session);
   });
 }

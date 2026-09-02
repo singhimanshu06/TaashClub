@@ -9,7 +9,7 @@ export default function TwentyEightDetailedScores({
   onBack,
 }: {
   game: GameState;
-  playerId: string;
+  playerId: string | null;
   onBack: () => void;
 }) {
   const history: RoundHistoryEntry[] = game.round_history ?? [];

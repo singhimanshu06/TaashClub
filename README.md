@@ -6,6 +6,11 @@ or across networks. Every game is server-authoritative: the Python engine owns
 all rules and state, clients render a redacted per-player view and send intents
 over a WebSocket.
 
+Once all player seats are occupied, a room can also be watched by up to ten
+read-only spectators. Spectators see public table cards and game state, but
+never private hands or legal actions; they may use chat with a chosen display
+name.
+
 It started as a single Callbreak variant and has grown into a platform that
 hosts several games behind one shared lobby/room/socket layer. AI bots can fill
 empty seats so you can play solo too.
@@ -99,6 +104,7 @@ docker run -p 8080:8080 taashclub     # app at http://localhost:8080
 ```bash
 cd backend
 .venv/bin/python -m pytest -q                 # engine + bot unit tests
+.venv/bin/python -m pytest tests/test_spectator.py -q # spectator/session checks
 .venv/bin/python tests/smoke_full_game.py     # all-human game over the socket (server must be running)
 .venv/bin/python tests/smoke_bots.py          # human + bots full game (server must be running)
 .venv/bin/python tests/smoke_president.py     # President over the socket

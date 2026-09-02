@@ -50,7 +50,7 @@ export interface GameSlots {
   /** End-of-game detailed scorecard view. */
   DetailedScores?: ComponentType<{
     game: GameState;
-    playerId: string;
+    playerId: string | null;
     onBack: () => void;
   }>;
 

@@ -26,6 +26,16 @@ class JoinRoomResponse(BaseModel):
     code: str
 
 
+class SpectateRoomRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=20)
+
+
+class SpectateRoomResponse(BaseModel):
+    spectator_id: str
+    chat_id: str
+    code: str
+
+
 class GameInfo(BaseModel):
     """One entry in the ``GET /games`` listing (frontend game picker)."""
     game_type: str

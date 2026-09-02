@@ -52,9 +52,10 @@ function InviteLink({ code }: { code: string }) {
 }
 
 export default function Lobby() {
-  const { lobby, playerId, code, connected, startGame, addBot, reset } = useStore(
+  const { lobby, role, playerId, code, connected, startGame, addBot, reset } = useStore(
     useShallow((s) => ({
       lobby: s.lobby,
+      role: s.role,
       playerId: s.playerId,
       code: s.code,
       connected: s.connected,
@@ -72,7 +73,8 @@ export default function Lobby() {
     );
   }
 
-  const isHost = lobby.host_id === playerId;
+  const isSpectator = role === "spectator";
+  const isHost = !isSpectator && lobby.host_id === playerId;
   const full = lobby.players.length >= lobby.num_players;
   const seats = Array.from({ length: lobby.num_players });
 
@@ -90,6 +92,7 @@ export default function Lobby() {
           {lobby.game_name} · {lobby.num_players} players
           {lobby.options.variant ? ` · ${VARIANT_LABEL[lobby.options.variant as string] ?? lobby.options.variant}` : ""} ·{" "}
           <span className={connected ? "dot-ok" : "dot-bad"}>{connected ? "connected" : "offline"}</span>
+          {isSpectator && <span className="spectator-label"> · watching</span>}
         </p>
 
         <InviteLink code={lobby.code} />
@@ -106,7 +109,7 @@ export default function Lobby() {
                   <>
                     <span className="seat-name">
                       {p.name}
-                      {p.id === playerId && <em> (you)</em>}
+                      {!isSpectator && p.id === playerId && <em> (you)</em>}
                     </span>
                     {p.id === lobby.host_id && <span className="host-tag">HOST</span>}
                   </>
@@ -118,7 +121,9 @@ export default function Lobby() {
           })}
         </ol>
 
-        {isHost ? (
+        {isSpectator ? (
+          <p className="waiting-text">Watching · waiting for the host to start…</p>
+        ) : isHost ? (
           <>
             {!full && (
               <button className="btn-secondary" onClick={addBot}>

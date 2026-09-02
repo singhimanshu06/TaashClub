@@ -3,8 +3,13 @@ import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 
 export default function Chat() {
-  const { messages, playerId, sendChat } = useStore(
-    useShallow((s) => ({ messages: s.messages, playerId: s.playerId, sendChat: s.sendChat }))
+  const { messages, playerId, chatId, sendChat } = useStore(
+    useShallow((s) => ({
+      messages: s.messages,
+      playerId: s.playerId,
+      chatId: s.chatId,
+      sendChat: s.sendChat,
+    }))
   );
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -60,7 +65,9 @@ export default function Chat() {
       <div className="chat-body" ref={bodyRef}>
         {messages.length === 0 && <p className="chat-empty">No messages yet. Say hi 👋</p>}
         {messages.map((m, i) => {
-          const mine = m.player_id === playerId;
+          const mine = m.author_id
+            ? m.author_id === (chatId ?? playerId)
+            : m.player_id === playerId;
           return (
             <div key={i} className={`chat-msg${mine ? " mine" : ""}`}>
               {!mine && <span className="chat-name">{m.name}</span>}

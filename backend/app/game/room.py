@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import secrets
 import string
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ CODE_ALPHABET = string.ascii_uppercase + string.digits
 CODE_LEN = 4
 CHAT_MAX_LEN = 300
 CHAT_HISTORY = 200
+MAX_SPECTATORS = 10
 
 
 def _gen_code(rng: random.Random) -> str:
@@ -33,6 +35,10 @@ class Room:
     players: list[Player] = field(default_factory=list)   # in join order
     game: Optional[BaseGame] = None
     sockets: dict[str, WebSocket] = field(default_factory=dict)
+    # Spectators have their own credentials and sockets. They never become
+    # players, so they do not consume seats or participate in player lifecycle.
+    spectators: dict[str, "Spectator"] = field(default_factory=dict)
+    spectator_sockets: dict[str, WebSocket] = field(default_factory=dict)
     chat_log: list[dict] = field(default_factory=list)
     clearing: bool = False   # guards the async post-trick clear (one task at a time)
     # Bot driver bookkeeping. bot_busy prevents scheduling two bot actions for
@@ -58,14 +64,19 @@ class Room:
     def has_bots(self) -> bool:
         return any(p.is_bot for p in self.players)
 
-    def add_chat(self, player_id: str, text: str) -> Optional[dict]:
+    def add_chat(self, author_id: str, text: str) -> Optional[dict]:
         text = (text or "").strip()[:CHAT_MAX_LEN]
         if not text:
             return None
-        author = next((p for p in self.players if p.id == player_id), None)
+        author = next((p for p in self.players if p.id == author_id), None)
+        spectator = next((s for s in self.spectators.values() if s.chat_id == author_id), None)
         msg = {
-            "player_id": player_id,
-            "name": author.name if author else "?",
+            # Keep player_id for existing player chat consumers. Spectator chat
+            # uses a separate non-secret author_id so the auth token is never
+            # sent to other clients.
+            "player_id": author.id if author else None,
+            "author_id": author.id if author else (spectator.chat_id if spectator else author_id),
+            "name": author.name if author else (spectator.name if spectator else "?"),
             "text": text,
             "ts": time.time(),
         }
@@ -108,6 +119,29 @@ class Room:
 
     def has_player(self, player_id: str) -> bool:
         return any(p.id == player_id for p in self.players)
+
+    def add_spectator(self, name: str) -> "Spectator":
+        if not (self.started or self.is_full()):
+            raise GameError("spectators can join once the room is full")
+        if len(self.spectator_sockets) >= MAX_SPECTATORS:
+            raise GameError("spectator limit reached")
+        name = name.strip()[:20]
+        if not name:
+            raise GameError("spectator name is required")
+
+        spectator_id = secrets.token_urlsafe(24)
+        while spectator_id in self.spectators:
+            spectator_id = secrets.token_urlsafe(24)
+        spectator = Spectator(
+            spectator_id=spectator_id,
+            chat_id="spectator-" + secrets.token_hex(8),
+            name=name,
+        )
+        self.spectators[spectator_id] = spectator
+        return spectator
+
+    def get_spectator(self, spectator_id: str) -> Optional["Spectator"]:
+        return self.spectators.get(spectator_id)
 
     def start_game(self, player_id: str) -> None:
         if player_id != self.host_id:
@@ -186,6 +220,15 @@ class RoomManager:
         return room
 
 
+@dataclass
+class Spectator:
+    """A read-only room session; ``spectator_id`` is never exposed in chat."""
+
+    spectator_id: str
+    chat_id: str
+    name: str
+
+
 class ConnectionManager:
     """Tracks live sockets per room and broadcasts redacted state to each viewer."""
 
@@ -196,27 +239,53 @@ class ConnectionManager:
             if p.id == player_id:
                 p.connected = True
 
+    async def connect_spectator(self, room: Room, spectator_id: str, ws: WebSocket) -> None:
+        await ws.accept()
+        previous = room.spectator_sockets.get(spectator_id)
+        if previous is not None and previous is not ws:
+            try:
+                await previous.close(code=4009)
+            except Exception:
+                pass
+        room.spectator_sockets[spectator_id] = ws
+
     def disconnect(self, room: Room, player_id: str) -> None:
         room.sockets.pop(player_id, None)
         for p in room.players:
             if p.id == player_id:
                 p.connected = False
 
+    def disconnect_spectator(self, room: Room, spectator_id: str, ws: Optional[WebSocket] = None) -> None:
+        # A reconnect can replace a socket. Do not let the old receive loop
+        # remove the replacement when it eventually observes its close.
+        if ws is None or room.spectator_sockets.get(spectator_id) is ws:
+            room.spectator_sockets.pop(spectator_id, None)
+
     async def send_to(self, room: Room, player_id: str, message: dict) -> None:
         ws = room.sockets.get(player_id)
         if ws is not None:
             await ws.send_json(message)
 
+    async def send_to_spectator(self, room: Room, spectator_id: str, message: dict) -> None:
+        ws = room.spectator_sockets.get(spectator_id)
+        if ws is not None:
+            await ws.send_json(message)
+
     async def broadcast(self, room: Room, message: dict) -> None:
-        """Send an identical message to every connected player (e.g. chat)."""
+        """Send an identical message to every connected room client (e.g. chat)."""
         for player_id, ws in list(room.sockets.items()):
             try:
                 await ws.send_json(message)
             except Exception:
                 self.disconnect(room, player_id)
+        for spectator_id, ws in list(room.spectator_sockets.items()):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                self.disconnect_spectator(room, spectator_id, ws)
 
     async def broadcast_state(self, room: Room) -> None:
-        """Send each connected player their own redacted view of the game/lobby."""
+        """Send each room client its redacted view of the game/lobby."""
         for player_id, ws in list(room.sockets.items()):
             if room.game is not None:
                 state = room.game.to_state(player_id)
@@ -234,3 +303,14 @@ class ConnectionManager:
                 await ws.send_json(payload)
             except Exception:
                 self.disconnect(room, player_id)
+        for spectator_id, ws in list(room.spectator_sockets.items()):
+            if room.game is not None:
+                state = room.game.to_state(None)
+                state["host_id"] = room.host_id
+                payload = {"type": "state_update", "state": state}
+            else:
+                payload = {"type": "lobby_update", "lobby": room.lobby_snapshot()}
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                self.disconnect_spectator(room, spectator_id, ws)

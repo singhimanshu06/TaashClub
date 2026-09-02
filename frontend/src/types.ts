@@ -133,7 +133,9 @@ export interface GameState {
 }
 
 export interface ChatMessage {
-  player_id: string;
+  player_id: string | null;
+  /** Public chat identity. Spectator auth tokens are never sent in messages. */
+  author_id?: string;
   name: string;
   text: string;
   ts: number;
