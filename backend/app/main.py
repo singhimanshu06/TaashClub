@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .game.base import GameError, Phase
-from .game.room import ConnectionManager, RoomManager, Room
+from .game.room import MAX_SPECTATORS, ConnectionManager, RoomManager, Room
 from .game.registry import get_game_spec, list_games
 from .protocol import (
     CreateRoomRequest,
@@ -18,6 +18,8 @@ from .protocol import (
     GameInfo,
     JoinRoomRequest,
     JoinRoomResponse,
+    SpectateRoomRequest,
+    SpectateRoomResponse,
 )
 
 # How long a completed trick stays on the table before it clears. Override with
@@ -78,6 +80,20 @@ def join_room(code: str, req: JoinRoomRequest):
     return JoinRoomResponse(player_id=player.id, join_order=player.join_order, code=room.code)
 
 
+@app.post("/rooms/{code}/spectate", response_model=SpectateRoomResponse)
+def spectate_room(code: str, req: SpectateRoomRequest):
+    try:
+        room = rooms.get(code)
+        spectator = room.add_spectator(req.name)
+    except GameError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return SpectateRoomResponse(
+        spectator_id=spectator.spectator_id,
+        chat_id=spectator.chat_id,
+        code=room.code,
+    )
+
+
 @app.get("/rooms/{code}")
 def get_room(code: str):
     try:
@@ -88,7 +104,12 @@ def get_room(code: str):
 
 
 @app.websocket("/ws/{code}")
-async def game_socket(ws: WebSocket, code: str, player_id: str):
+async def game_socket(
+    ws: WebSocket,
+    code: str,
+    player_id: str | None = None,
+    spectator_id: str | None = None,
+):
     try:
         room = rooms.get(code)
     except GameError:
@@ -98,6 +119,37 @@ async def game_socket(ws: WebSocket, code: str, player_id: str):
         await ws.accept()
         await ws.close(code=4004)
         return
+    if player_id is None and spectator_id is None:
+        await ws.accept()
+        await ws.close(code=4003)
+        return
+
+    if player_id is None:
+        spectator = room.get_spectator(spectator_id or "")
+        if spectator is None:
+            await ws.accept()
+            await ws.close(code=4005)
+            return
+        if len(room.spectator_sockets) >= MAX_SPECTATORS and spectator_id not in room.spectator_sockets:
+            await ws.accept()
+            await ws.close(code=4008)
+            return
+
+        await connections.connect_spectator(room, spectator.spectator_id, ws)
+        await connections.send_to_spectator(
+            room,
+            spectator.spectator_id,
+            {"type": "chat_history", "messages": room.chat_log},
+        )
+        await _after_state_change(room)
+        try:
+            while True:
+                msg = await ws.receive_json()
+                await handle_spectator_event(room, spectator.spectator_id, msg)
+        except WebSocketDisconnect:
+            connections.disconnect_spectator(room, spectator.spectator_id, ws)
+        return
+
     if not room.has_player(player_id):
         await ws.accept()
         await ws.close(code=4003)
@@ -167,6 +219,23 @@ async def handle_event(room: Room, player_id: str, msg: dict) -> None:
         return
 
     await _after_state_change(room)
+
+
+async def handle_spectator_event(room: Room, spectator_id: str, msg: dict) -> None:
+    """Handle the only command available to spectators: chat."""
+    spectator = room.get_spectator(spectator_id)
+    if spectator is None:
+        return
+    if msg.get("type") == "chat":
+        chat_msg = room.add_chat(spectator.chat_id, str(msg.get("text", "")))
+        if chat_msg:
+            await connections.broadcast(room, {"type": "chat", "message": chat_msg})
+        return
+    await connections.send_to_spectator(
+        room,
+        spectator_id,
+        {"type": "error", "message": "Spectators can only send chat messages."},
+    )
 
 
 async def _after_state_change(room: Room) -> None:

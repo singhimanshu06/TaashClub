@@ -39,7 +39,7 @@ export default function GameOver({ game }: { game: GameState }) {
       : null;
 
   if (showDetailed && DetailedScores) {
-    return <DetailedScores game={game} playerId={playerId!} onBack={() => setShowDetailed(false)} />;
+    return <DetailedScores game={game} playerId={playerId} onBack={() => setShowDetailed(false)} />;
   }
 
   return (

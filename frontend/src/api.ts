@@ -10,6 +10,16 @@ export const WS_BASE = DEV
   ? `ws://${location.hostname}:8000`
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 
+export class ApiError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(API_BASE + path, {
     method: "POST",
@@ -18,7 +28,15 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(detail.detail || "request failed");
+    const value = detail.detail;
+    if (value && typeof value === "object") {
+      throw new ApiError(value.message || "request failed", value.code);
+    }
+    const message = value || "request failed";
+    let code: string | undefined;
+    if (message === "room is full") code = "ROOM_FULL";
+    if (message === "game already started") code = "GAME_STARTED";
+    throw new ApiError(message, code);
   }
   return res.json();
 }
@@ -44,6 +62,13 @@ export function createRoom(gameType: string, numPlayers: number, options: Record
 export function joinRoom(code: string, name: string) {
   return post<{ player_id: string; join_order: number; code: string }>(
     `/rooms/${code.toUpperCase()}/join`,
+    { name }
+  );
+}
+
+export function spectateRoom(code: string, name: string) {
+  return post<{ spectator_id: string; chat_id: string; code: string }>(
+    `/rooms/${code.toUpperCase()}/spectate`,
     { name }
   );
 }

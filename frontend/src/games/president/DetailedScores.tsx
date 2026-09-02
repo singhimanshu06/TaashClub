@@ -18,7 +18,7 @@ export default function PresidentDetailedScores({
   onBack,
 }: {
   game: GameState;
-  playerId: string;
+  playerId: string | null;
   onBack: () => void;
 }) {
   const players = [...game.players].sort((a, b) => a.seat - b.seat);

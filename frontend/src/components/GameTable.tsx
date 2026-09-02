@@ -97,15 +97,17 @@ function SelfChip({
 }
 
 export default function GameTable() {
-  const { game, playerId, sendAction, reset } = useStore(
+  const { game, role, playerId, sendAction, reset } = useStore(
     useShallow((s) => ({
       game: s.game as GameState,
-      playerId: s.playerId!,
+      role: s.role,
+      playerId: s.playerId,
       sendAction: s.sendAction,
       reset: s.reset,
     }))
   );
 
+  const isSpectator = role === "spectator";
   const slots = getGameSlots(game.game_type);
   const StatusExtra = slots.StatusExtra;
   const ActionPanel = slots.ActionPanel;
@@ -115,8 +117,8 @@ export default function GameTable() {
   const rendersOwnHand = slots.rendersOwnHand ?? false;
   const trickWraps = slots.trickWraps ?? false;
 
-  const me = game.players.find((p) => p.id === playerId);
-  const isMyTurn = game.current_player_id === playerId;
+  const me = playerId ? game.players.find((p) => p.id === playerId) : undefined;
+  const isMyTurn = !isSpectator && game.current_player_id === playerId;
   const nameById = (id: string) => game.players.find((p) => p.id === id)?.name ?? "";
 
   // Ring layout: everyone in play order (seat number ascending), viewer pinned
@@ -124,10 +126,9 @@ export default function GameTable() {
   // other and from the table rim, preserves turn order around the ring, and
   // seats partnership teammates opposite (4p) / alternating (6p) for free.
   const ordered = [...game.players].sort((a, b) => a.seat - b.seat);
-  const viewerIndex = Math.max(
-    ordered.findIndex((p) => p.id === playerId),
-    0
-  );
+  const viewerIndex = isSpectator
+    ? 0
+    : Math.max(ordered.findIndex((p) => p.id === playerId), 0);
   const seatPos = seatPositions(ordered.length, viewerIndex);
 
   // Team tinting — inert until a team game sends `teams`.
@@ -211,7 +212,7 @@ export default function GameTable() {
 
   // Guard: if the viewer isn't in the player list (transient state), render
   // nothing to avoid crashing on `me.name`.
-  if (!me) return null;
+  if (!me && !isSpectator) return null;
 
   const renderedTrick =
     game.phase === "playing" && game.current_trick.length > 0
@@ -257,6 +258,7 @@ export default function GameTable() {
           <Scorecard game={game} playerId={playerId} />
         </div>
         <div className="status-center">
+          {isSpectator && <div className="status-chip spectator-chip">Watching</div>}
           {totalRounds != null && (
             <div className="status-chip">
               Round <strong>{game.round_index + 1}</strong> / {totalRounds}
@@ -295,7 +297,7 @@ export default function GameTable() {
           <div className="felt" />
 
           {/* Opponents on the ring (play order clockwise from the viewer) */}
-          {ordered.map((p, i) => (p.id === playerId ? null : seatNode(p, i)))}
+          {ordered.map((p, i) => (isSpectator || p.id !== playerId ? seatNode(p, i) : null))}
 
           {/* Status pill + played cards, stacked in the middle of the table */}
           <div className="trick-col">
@@ -359,40 +361,44 @@ export default function GameTable() {
           {/* Viewer's own chip sits just below the table, top edge touching
               the felt's bottom rim (tall screens; on short screens the copy
               in the self-strip shows) */}
-          <SelfChip
-            me={me}
-            isMyTurn={isMyTurn}
-            teamClass={teamClass(playerId)}
-            SelfStats={SelfStats}
-            game={game}
-            variant="table"
-          />
+          {!isSpectator && me && (
+            <SelfChip
+              me={me}
+              isMyTurn={isMyTurn}
+              teamClass={teamClass(me.id)}
+              SelfStats={SelfStats}
+              game={game}
+              variant="table"
+            />
+          )}
         </div>
       </div>
 
       {/* Your area: action panel (bid picker / combo selector) above the hand.
           Games whose ActionPanel renders its own Hand (President) set
           rendersOwnHand so this doesn't render a second Hand. */}
-      <div className={`self-strip${isMyTurn ? " active" : ""}`}>
-        <SelfChip
-          me={me}
-          isMyTurn={isMyTurn}
-          teamClass={teamClass(playerId)}
-          SelfStats={SelfStats}
-          game={game}
-          variant="strip"
-        />
-        {ActionPanel && (
-          <ActionPanel game={game} isMyTurn={isMyTurn} sendAction={sendAction} />
-        )}
-        {!rendersOwnHand && (
-          <Hand
-            hand={me.hand ?? []}
-            legal={game.phase === "playing" && isMyTurn ? game.your_legal_cards : null}
-            onPlay={(card) => sendAction("play_card", { card })}
+      {!isSpectator && me && (
+        <div className={`self-strip${isMyTurn ? " active" : ""}`}>
+          <SelfChip
+            me={me}
+            isMyTurn={isMyTurn}
+            teamClass={teamClass(me.id)}
+            SelfStats={SelfStats}
+            game={game}
+            variant="strip"
           />
-        )}
-      </div>
+          {ActionPanel && (
+            <ActionPanel game={game} isMyTurn={isMyTurn} sendAction={sendAction} />
+          )}
+          {!rendersOwnHand && (
+            <Hand
+              hand={me.hand ?? []}
+              legal={game.phase === "playing" && isMyTurn ? game.your_legal_cards : null}
+              onPlay={(card) => sendAction("play_card", { card })}
+            />
+          )}
+        </div>
+      )}
 
       {/* Overlays */}
       {game.phase === "round_end" && RoundResult && (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createRoom, fetchGames, joinRoom } from "../api";
+import { ApiError, createRoom, fetchGames, joinRoom, spectateRoom } from "../api";
 import { useStore } from "../store";
 import type { GameInfo } from "../types";
 import { getGameSlots } from "../games/registry";
@@ -49,6 +49,7 @@ type SetupMode = "create" | "join";
 
 export default function Home() {
   const enterRoom = useStore((s) => s.enterRoom);
+  const enterSpectator = useStore((s) => s.enterSpectator);
   const initialRoom = roomFromUrl();
 
   // Two-step flow: "pick" (game grid) -> "setup" (name + params + create/join).
@@ -63,6 +64,7 @@ export default function Home() {
   const [options, setOptions] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [errCode, setErrCode] = useState<string | undefined>();
   const [rulesForInfo, setRulesForInfo] = useState<GameInfo | null>(null);
 
   useEffect(() => {
@@ -93,16 +95,19 @@ export default function Home() {
   function backToPick() {
     setStep("pick");
     setErr(null);
+    setErrCode(undefined);
   }
 
   function gotoJoin() {
     setSetupMode("join");
     setStep("setup");
     setErr(null);
+    setErrCode(undefined);
   }
 
   async function handleSubmit() {
     setErr(null);
+    setErrCode(undefined);
     if (!name.trim()) return setErr("Please enter your name.");
     if (setupMode === "join" && !code.trim()) return setErr("Please enter a room code.");
     if (setupMode === "create" && !gameType) return setErr("Please pick a game first.");
@@ -116,6 +121,24 @@ export default function Home() {
       enterRoom(joined.code, joined.player_id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong.");
+      setErrCode(e instanceof ApiError ? e.code : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleWatch() {
+    setErr(null);
+    setErrCode(undefined);
+    if (!name.trim()) return setErr("Please enter your name for chat.");
+    if (!code.trim()) return setErr("Please enter a room code.");
+    setBusy(true);
+    try {
+      const watched = await spectateRoom(code.trim(), name.trim());
+      enterSpectator(watched.code, watched.spectator_id, watched.chat_id, name.trim());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Something went wrong.");
+      setErrCode(e instanceof ApiError ? e.code : undefined);
     } finally {
       setBusy(false);
     }
@@ -211,20 +234,26 @@ export default function Home() {
         <div className="segmented">
           <button
             className={setupMode === "create" ? "seg active" : "seg"}
-            onClick={() => setSetupMode("create")}
+            onClick={() => {
+              setSetupMode("create");
+              setErrCode(undefined);
+            }}
           >
             Create Room
           </button>
           <button
             className={setupMode === "join" ? "seg active" : "seg"}
-            onClick={() => setSetupMode("join")}
+            onClick={() => {
+              setSetupMode("join");
+              setErrCode(undefined);
+            }}
           >
             Join Room
           </button>
         </div>
 
         <label className="field">
-          <span>Your name</span>
+          <span>{setupMode === "join" ? "Your name (also used for chat)" : "Your name"}</span>
           <input
             value={name}
             maxLength={20}
@@ -260,6 +289,11 @@ export default function Home() {
         <button className="btn-primary" disabled={busy} onClick={handleSubmit}>
           {busy ? "Please wait…" : setupMode === "join" ? "Join Game" : "Create & Join"}
         </button>
+        {setupMode === "join" && (errCode === "ROOM_FULL" || errCode === "GAME_STARTED") && (
+          <button className="btn-secondary" disabled={busy} onClick={handleWatch}>
+            Watch Game
+          </button>
+        )}
       </div>
 
       {rulesForInfo && (

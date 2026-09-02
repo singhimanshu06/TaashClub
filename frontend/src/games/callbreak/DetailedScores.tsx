@@ -8,7 +8,7 @@ export default function CallbreakDetailedScores({
   onBack,
 }: {
   game: GameState;
-  playerId: string;
+  playerId: string | null;
   onBack: () => void;
 }) {
   // Players in seat order (stable columns across all rounds).

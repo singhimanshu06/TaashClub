@@ -3,7 +3,7 @@ import type { GameState, StatePlayer } from "../types";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
 
-export default function Scorecard({ game, playerId }: { game: GameState; playerId: string }) {
+export default function Scorecard({ game, playerId }: { game: GameState; playerId: string | null }) {
   const [open, setOpen] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
 
