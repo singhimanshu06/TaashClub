@@ -175,16 +175,64 @@ export default function GameTable() {
   const totalRounds = game.rounds_total ?? game.total_rounds;
   const cardsThisRound = game.cards_this_round;
 
+  // President clears its pile immediately, unlike trick-taking games which
+  // expose awaiting_trick_clear. Keep the last pile briefly so it can animate
+  // toward the player who won it before disappearing.
+  const [clearingPile, setClearingPile] = useState<{
+    trick: GameState["current_trick"];
+    targetId: string | null;
+  } | null>(null);
+  const previousTrick = useRef(game.current_trick);
+  useEffect(() => {
+    const previous = previousTrick.current;
+    const current = game.current_trick;
+
+    if (
+      trickWraps &&
+      game.phase === "playing" &&
+      previous.length > 0 &&
+      current.length === 0 &&
+      !game.awaiting_trick_clear
+    ) {
+      const lastPlay = previous[previous.length - 1];
+      setClearingPile({
+        trick: previous,
+        targetId: lastPlay?.player_id ?? null,
+      });
+    }
+
+    previousTrick.current = current;
+  }, [game.current_trick, game.phase, game.awaiting_trick_clear, trickWraps]);
+  useEffect(() => {
+    if (!clearingPile) return;
+    const timer = window.setTimeout(() => setClearingPile(null), 1100);
+    return () => window.clearTimeout(timer);
+  }, [clearingPile]);
+
   // Guard: if the viewer isn't in the player list (transient state), render
   // nothing to avoid crashing on `me.name`.
   if (!me) return null;
+
+  const renderedTrick =
+    game.phase === "playing" && game.current_trick.length > 0
+      ? game.current_trick
+      : game.phase === "playing"
+        ? clearingPile?.trick ?? []
+        : [];
+  const trickIsClearing =
+    game.awaiting_trick_clear || (clearingPile !== null && game.current_trick.length === 0);
+  const clearTargetId = game.trick_winner_id ?? clearingPile?.targetId ?? null;
+  const clearTargetIndex = clearTargetId
+    ? ordered.findIndex((p) => p.id === clearTargetId)
+    : -1;
+  const clearTargetRim = clearTargetIndex >= 0 ? seatPos[clearTargetIndex].rim : null;
 
   const seatNode = (p: StatePlayer, i: number) => {
     const isCurrent = game.current_player_id === p.id;
     return (
       <div
         key={p.id}
-        className={`seat-pos seat-rim-${seatPos[i].rim}${isCurrent ? " seat-turn" : ""}`}
+        className={`seat-pos seat-rim-${seatPos[i].rim}${teamClass(p.id)}${isCurrent ? " seat-turn" : ""}`}
         style={{ left: `${seatPos[i].left}%`, top: `${seatPos[i].top}%` }}
       >
         <Seat
@@ -269,15 +317,25 @@ export default function GameTable() {
             {game.phase === "exchange" && (
               <p className="trick-hint">Card exchange in progress…</p>
             )}
-            {game.current_trick.length > 0 && (
+            {renderedTrick.length > 0 && (
               <div
-                className={`trick-row${trickWraps ? " trick-row-wrap" : ""}`}
-                style={{ "--n": game.current_trick.length } as CSSProperties}
+                className={`trick-row${trickWraps ? " trick-row-wrap" : ""}${
+                  trickIsClearing && clearTargetRim
+                    ? ` trick-row-clearing collect-to-${clearTargetRim}`
+                    : ""
+                }`}
+                style={{ "--n": renderedTrick.length } as CSSProperties}
               >
-                {game.current_trick.map((t, i) => {
+                {renderedTrick.map((t, i) => {
                   const cards = trickCards(t);
+                  const playerIndex = ordered.findIndex((p) => p.id === t.player_id);
+                  const playerRim = playerIndex >= 0 ? seatPos[playerIndex].rim : "top";
                   return (
-                    <div key={`${t.player_id}-${i}`} className="trick-slot">
+                    <div
+                      key={`${t.player_id}-${i}`}
+                      className={`trick-slot trick-from-${playerRim}`}
+                      style={{ "--slot-delay": `${i * 45}ms` } as CSSProperties}
+                    >
                       <div className="trick-cards">
                         {cards.map((c, j) => (
                           <PlayingCard
