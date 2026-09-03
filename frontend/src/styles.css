@@ -24,7 +24,20 @@ body,
 .app {
   margin: 0;
   height: 100%;
-  min-height: 100vh;
+  min-height: 100%;
+}
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.app {
+  /* Use the current device viewport so mobile browser chrome cannot create a
+     scrollable strip below the app. The first declaration is the fallback. */
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 body {
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -35,7 +48,8 @@ body {
 }
 
 .screen {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 100%;
   padding: 20px;
 }
 .center {
@@ -78,6 +92,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow-y: auto;
 }
 .home-card {
   width: 100%;
@@ -459,6 +474,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow-y: auto;
 }
 .lobby-card {
   width: 100%;
@@ -681,7 +697,8 @@ body {
 .table-screen {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 100%;
   padding: 14px;
 }
 .status-bar {
@@ -753,8 +770,9 @@ body {
 .table-screen {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
   padding:
     max(12px, env(safe-area-inset-top))
     max(14px, env(safe-area-inset-right))
