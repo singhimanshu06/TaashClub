@@ -897,9 +897,11 @@ body {
   transition: box-shadow 0.2s ease, border-color 0.2s ease, translate 0.2s ease;
 }
 .seat-tile.current {
-  border-color: var(--gold-bright);
-  box-shadow: 0 0 0 1px rgba(216, 187, 118, 0.18), 0 5px 16px rgba(0, 0, 0, 0.48), 0 0 14px rgba(183, 148, 82, 0.28);
-  translate: 0 -1px;
+  border: 2px solid var(--gold-bright);
+  background: linear-gradient(150deg, rgba(183, 148, 82, 0.42), rgba(24, 29, 21, 0.98));
+  box-shadow: 0 0 0 3px rgba(216, 187, 118, 0.3), 0 5px 16px rgba(0, 0, 0, 0.48), 0 0 22px rgba(216, 187, 118, 0.62);
+  translate: 0 -2px;
+  animation: turnPulse 1.8s ease-in-out infinite;
 }
 .seat-tile.winner {
   border-color: #86b898;
@@ -1001,6 +1003,21 @@ body {
   color: var(--gold-bright);
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.04);
   white-space: nowrap;
+}
+.self-pos.seat-turn .self-chip {
+  border: 2px solid var(--gold-bright);
+  background: linear-gradient(145deg, rgba(183, 148, 82, 0.42), rgba(15, 17, 14, 0.97));
+  box-shadow: 0 0 0 3px rgba(216, 187, 118, 0.3), 0 5px 15px rgba(0, 0, 0, 0.46), 0 0 22px rgba(216, 187, 118, 0.62);
+  animation: turnPulse 1.8s ease-in-out infinite;
+}
+@keyframes turnPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(216, 187, 118, 0.3), 0 5px 16px rgba(0, 0, 0, 0.48), 0 0 18px rgba(216, 187, 118, 0.52);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(216, 187, 118, 0.48), 0 5px 16px rgba(0, 0, 0, 0.48), 0 0 28px rgba(216, 187, 118, 0.82);
+  }
 }
 .self-meta {
   display: flex;
