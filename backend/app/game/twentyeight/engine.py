@@ -28,9 +28,9 @@ Rules implemented (original version):
 - From the trick in which trump is exposed onward, the highest trump wins the
   trick — including trump-suit cards played before the exposure within that
   same trick. Otherwise the highest card of the led suit wins.
-- A deal ends early (at trick commit) once the opposition has captured more
-  than ``TOTAL_CARD_POINTS - bid`` points: the bidder's partnership can no
-  longer reach the bid, so the result is decided.
+- A deal ends early (at trick commit) once either partnership has captured at
+  least the standing bid, or the opposition has captured more than
+  ``TOTAL_CARD_POINTS - bid`` points. In either case the result is decided.
 - Scoring is per partnership (opposite seats): bidder's team must capture card
   points >= their bid: +1 to both partners if made, -1 if not. Most game
   points after ``total_rounds`` deals wins (ties possible and declared).
@@ -389,12 +389,15 @@ class Game:
             self._end_deal()
             return
 
-        # Early decision: once the opposition holds more than
-        # TOTAL_CARD_POINTS - bid points, the bidder's partnership cannot
-        # reach the bid — no point playing the remaining tricks.
+        # Early decision: once either partnership has reached the standing bid,
+        # or the opposition holds more than TOTAL_CARD_POINTS - bid points,
+        # the result is decided — no point playing the remaining tricks.
         if self.bidder_seat is not None and self.high_bid is not None:
-            opposition = 1 - self.team_of(self.bidder_seat)
-            if self.captured[opposition] > TOTAL_CARD_POINTS - self.high_bid:
+            bidder_team = self.team_of(self.bidder_seat)
+            opposition = 1 - bidder_team
+            bid_reached = max(self.captured) >= self.high_bid
+            bid_impossible = self.captured[opposition] > TOTAL_CARD_POINTS - self.high_bid
+            if bid_reached or bid_impossible:
                 self._end_deal()
 
     def _trick_winner(self) -> int:

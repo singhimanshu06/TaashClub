@@ -503,7 +503,7 @@ def test_deal_continues_at_exact_boundary():
     assert g.round_history == []
 
 
-def test_bid_made_early_does_not_end_deal():
+def test_bid_made_early_ends_deal():
     g = new_game()
     run_simple_auction(g, bid=14)
     g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
@@ -513,8 +513,28 @@ def test_bid_made_early_does_not_end_deal():
     g.awaiting_trick_clear = True
     g.last_trick_winner_seat = 1
     g.commit_trick()
-    assert g.phase == Phase.PLAYING         # plays out per request scope
-    assert g.round_history == []
+    assert g.phase == Phase.ROUND_END
+    assert len(g.round_history) == 1
+    assert g.round_history[-1]["bid_made"] is True
+    assert g.round_history[-1]["captured_points"] == 17
+    assert any(len(p.hand) > 0 for p in g.players)
+
+
+def test_opposition_reaching_bid_early_ends_deal():
+    g = new_game()
+    run_simple_auction(g, bid=14)
+    g.apply_action(pid(g, 1), "set_trump", {"suit": "S"})
+    g.captured = [14, 0]                   # opposition reaches the standing bid
+    g.current_trick = [{"seat": 0, "card": card(7)}]
+    g.led_suit = Suit.SPADE
+    g.awaiting_trick_clear = True
+    g.last_trick_winner_seat = 0
+    g.commit_trick()
+    assert g.phase == Phase.ROUND_END
+    assert len(g.round_history) == 1
+    assert g.round_history[-1]["bid_made"] is False
+    assert g.round_history[-1]["captured_points"] == 0
+    assert any(len(p.hand) > 0 for p in g.players)
 
 
 def test_registry_entry_exists():
