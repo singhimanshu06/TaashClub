@@ -1169,7 +1169,7 @@ body {
 .trick-row-clearing .trick-slot {
   animation-name: collectTrick;
   animation-duration: 0.72s;
-  animation-delay: calc(160ms + var(--slot-delay, 0ms));
+  animation-delay: calc(1000ms + var(--slot-delay, 0ms));
   animation-timing-function: cubic-bezier(0.55, 0.05, 0.85, 0.35);
   animation-fill-mode: forwards;
 }
