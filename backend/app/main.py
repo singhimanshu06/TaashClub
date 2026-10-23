@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import random
+import time
+from collections import deque
+from typing import Callable
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -36,8 +40,97 @@ BOT_AUTO_ADVANCE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_AUTO_ADVANCE", "6
 # bot (so the game continues for everyone else). If they reconnect before this
 # fires, the conversion is cancelled.
 BOT_CONVERSION_GRACE_SECONDS = float(os.environ.get("TAASHCLUB_BOT_CONVERSION_GRACE", "60"))
+MAX_ACTIVE_CONNECTIONS = int(os.environ.get("MAX_ACTIVE_CONNECTIONS", "50"))
+MAX_IN_FLIGHT_HTTP = int(os.environ.get("MAX_IN_FLIGHT_HTTP", "20"))
+REST_RATE_LIMIT = int(os.environ.get("REST_RATE_LIMIT", "30"))
+REST_RATE_WINDOW_SECONDS = float(os.environ.get("REST_RATE_WINDOW_SECONDS", "60"))
+WS_MESSAGES_PER_SECOND = int(os.environ.get("WS_MESSAGES_PER_SECOND", "20"))
+MAX_WS_MESSAGE_BYTES = int(os.environ.get("MAX_WS_MESSAGE_BYTES", "65536"))
+MAX_ACTIVE_ROOMS = int(os.environ.get("MAX_ACTIVE_ROOMS", "10"))
+EMPTY_ROOM_TTL_SECONDS = float(os.environ.get("EMPTY_ROOM_TTL_SECONDS", "180"))
 
 app = FastAPI(title="TaashClub")
+
+
+class AdmissionLimitMiddleware:
+    """Bound total live scopes and simultaneous HTTP work in this process."""
+
+    def __init__(self, app: Callable):
+        self.app = app
+        self.active_connections = 0
+        self.active_http = 0
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable):
+        scope_type = scope["type"]
+        if scope_type not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if self.active_connections >= MAX_ACTIVE_CONNECTIONS:
+            if scope_type == "websocket":
+                await send({"type": "websocket.close", "code": 1013})
+            else:
+                await self._reject_http(send, 503, "server is temporarily busy")
+            return
+
+        if scope_type == "http" and self.active_http >= MAX_IN_FLIGHT_HTTP:
+            await self._reject_http(send, 503, "server is temporarily busy")
+            return
+
+        self.active_connections += 1
+        if scope_type == "http":
+            self.active_http += 1
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.active_connections -= 1
+            if scope_type == "http":
+                self.active_http -= 1
+
+    @staticmethod
+    async def _reject_http(send: Callable, status: int, message: str) -> None:
+        body = json.dumps({"detail": message}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"retry-after", b"1"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+
+
+class SlidingWindowLimiter:
+    def __init__(self, limit: int, window_seconds: float):
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self._events: dict[str, deque[float]] = {}
+
+    def allow(self, key: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        events = self._events.setdefault(key, deque())
+        cutoff = now - self.window_seconds
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if len(events) >= self.limit:
+            return False
+        events.append(now)
+        return True
+
+    def prune(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        cutoff = now - self.window_seconds
+        for key in list(self._events):
+            events = self._events[key]
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if not events:
+                del self._events[key]
+
+
+app.add_middleware(AdmissionLimitMiddleware)
 
 # In production set ALLOWED_ORIGINS to your deployment domain, e.g.:
 #   ALLOWED_ORIGINS=https://taashclub.fly.dev
@@ -54,6 +147,74 @@ app.add_middleware(
 
 rooms = RoomManager()
 connections = ConnectionManager()
+rest_limiters = {
+    "create": SlidingWindowLimiter(REST_RATE_LIMIT, REST_RATE_WINDOW_SECONDS),
+    "join": SlidingWindowLimiter(REST_RATE_LIMIT, REST_RATE_WINDOW_SECONDS),
+    "spectate": SlidingWindowLimiter(REST_RATE_LIMIT, REST_RATE_WINDOW_SECONDS),
+}
+
+
+def _client_ip(headers, client) -> str:
+    # Fly Proxy supplies this header. The fallback keeps local development useful.
+    return headers.get("fly-client-ip") or (client.host if client else "unknown")
+
+
+def _check_rest_limit(request: Request, endpoint: str) -> None:
+    limiter = rest_limiters[endpoint]
+    if limiter.allow(_client_ip(request.headers, request.client)):
+        return
+    raise HTTPException(
+        status_code=429,
+        detail="too many requests",
+        headers={"Retry-After": str(max(1, int(REST_RATE_WINDOW_SECONDS)))},
+    )
+
+
+async def _cleanup_rooms_loop() -> None:
+    while True:
+        await asyncio.sleep(30)
+        rooms.cleanup_expired(EMPTY_ROOM_TTL_SECONDS)
+        for limiter in rest_limiters.values():
+            limiter.prune()
+
+
+@app.on_event("startup")
+async def start_cleanup_task() -> None:
+    app.state.room_cleanup_task = asyncio.create_task(_cleanup_rooms_loop())
+
+
+@app.on_event("shutdown")
+async def stop_cleanup_task() -> None:
+    task = getattr(app.state, "room_cleanup_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+class WebSocketLimitExceeded(Exception):
+    pass
+
+
+async def _receive_limited_json(ws: WebSocket, limiter: SlidingWindowLimiter, key: str) -> dict:
+    if not limiter.allow(key):
+        await ws.close(code=1013, reason="message rate limit exceeded")
+        raise WebSocketLimitExceeded
+    message = await ws.receive()
+    if message.get("type") == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+    data = message.get("bytes")
+    if data is None:
+        data = (message.get("text") or "").encode()
+    if len(data) > MAX_WS_MESSAGE_BYTES:
+        await ws.close(code=1009, reason="message too large")
+        raise WebSocketLimitExceeded
+    value = json.loads(data)
+    if not isinstance(value, dict):
+        raise ValueError("message must be an object")
+    return value
 
 
 @app.get("/games", response_model=list[GameInfo])
@@ -62,16 +223,21 @@ def games():
 
 
 @app.post("/rooms", response_model=CreateRoomResponse)
-def create_room(req: CreateRoomRequest):
+def create_room(req: CreateRoomRequest, request: Request):
+    _check_rest_limit(request, "create")
+    rooms.cleanup_expired(EMPTY_ROOM_TTL_SECONDS)
     try:
-        room = rooms.create_room(req.game_type, req.num_players, req.options)
+        room = rooms.create_room(
+            req.game_type, req.num_players, req.options, MAX_ACTIVE_ROOMS
+        )
     except GameError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CreateRoomResponse(code=room.code)
 
 
 @app.post("/rooms/{code}/join", response_model=JoinRoomResponse)
-def join_room(code: str, req: JoinRoomRequest):
+def join_room(code: str, req: JoinRoomRequest, request: Request):
+    _check_rest_limit(request, "join")
     try:
         room = rooms.get(code)
         player = room.add_player(req.name)
@@ -81,7 +247,8 @@ def join_room(code: str, req: JoinRoomRequest):
 
 
 @app.post("/rooms/{code}/spectate", response_model=SpectateRoomResponse)
-def spectate_room(code: str, req: SpectateRoomRequest):
+def spectate_room(code: str, req: SpectateRoomRequest, request: Request):
+    _check_rest_limit(request, "spectate")
     try:
         room = rooms.get(code)
         spectator = room.add_spectator(req.name)
@@ -136,6 +303,8 @@ async def game_socket(
             return
 
         await connections.connect_spectator(room, spectator.spectator_id, ws)
+        message_limiter = SlidingWindowLimiter(WS_MESSAGES_PER_SECOND, 1)
+        client_ip = _client_ip(ws.headers, ws.client)
         await connections.send_to_spectator(
             room,
             spectator.spectator_id,
@@ -144,9 +313,10 @@ async def game_socket(
         await _after_state_change(room)
         try:
             while True:
-                msg = await ws.receive_json()
+                msg = await _receive_limited_json(ws, message_limiter, client_ip)
+                room.touch()
                 await handle_spectator_event(room, spectator.spectator_id, msg)
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, WebSocketLimitExceeded, ValueError, json.JSONDecodeError):
             connections.disconnect_spectator(room, spectator.spectator_id, ws)
         return
 
@@ -156,6 +326,8 @@ async def game_socket(
         return
 
     await connections.connect(room, player_id, ws)
+    message_limiter = SlidingWindowLimiter(WS_MESSAGES_PER_SECOND, 1)
+    client_ip = _client_ip(ws.headers, ws.client)
 
     # Player reconnected — cancel any pending disconnect→bot conversion. If
     # they were already converted (came back late), take back control.
@@ -171,9 +343,10 @@ async def game_socket(
 
     try:
         while True:
-            msg = await ws.receive_json()
+            msg = await _receive_limited_json(ws, message_limiter, client_ip)
+            room.touch()
             await handle_event(room, player_id, msg)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, WebSocketLimitExceeded, ValueError, json.JSONDecodeError):
         connections.disconnect(room, player_id)
         await _broadcast_player_status(room, player_id, False)
         _schedule_conversion_if_needed(room, player_id)

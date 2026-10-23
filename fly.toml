@@ -17,6 +17,14 @@ primary_region = 'lhr'
 
 [env]
   PORT = '8080'
+  MAX_ACTIVE_CONNECTIONS = '50'
+  MAX_IN_FLIGHT_HTTP = '20'
+  REST_RATE_LIMIT = '30'
+  REST_RATE_WINDOW_SECONDS = '60'
+  WS_MESSAGES_PER_SECOND = '20'
+  MAX_WS_MESSAGE_BYTES = '65536'
+  MAX_ACTIVE_ROOMS = '10'
+  EMPTY_ROOM_TTL_SECONDS = '180'
 
 [http_service]
   internal_port = 8080

@@ -33,4 +33,4 @@ ENV PORT=8080
 
 EXPOSE $PORT
 
-CMD uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+CMD uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT --ws-max-size 65536

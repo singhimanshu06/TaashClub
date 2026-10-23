@@ -51,6 +51,11 @@ class Room:
     # Pending disconnect→bot conversion tasks, keyed by player_id. Cancelled if
     # the player reconnects before the grace period expires.
     conversion_timers: dict = field(default_factory=dict)
+    created_at: float = field(default_factory=time.monotonic)
+    last_activity_at: float = field(default_factory=time.monotonic)
+
+    def touch(self) -> None:
+        self.last_activity_at = time.monotonic()
 
     @property
     def spec(self) -> GameSpec:
@@ -96,6 +101,7 @@ class Room:
                         name=name.strip()[:20] or f"Player {len(self.players) + 1}",
                         join_order=len(self.players))
         self.players.append(player)
+        self.touch()
         if self.host_id is None:
             self.host_id = player.id
         return player
@@ -138,6 +144,7 @@ class Room:
             name=name,
         )
         self.spectators[spectator_id] = spectator
+        self.touch()
         return spectator
 
     def get_spectator(self, spectator_id: str) -> Optional["Spectator"]:
@@ -219,7 +226,12 @@ class RoomManager:
         self.rooms[code] = room
         return room
 
-    def create_room(self, game_type: str, num_players: int, options: dict) -> Room:
+    def create_room(self, game_type: str, num_players: int, options: dict,
+                    max_active_rooms: int | None = None) -> Room:
+        if max_active_rooms is not None:
+            active_rooms = sum(code != "HOME" for code in self.rooms)
+            if active_rooms >= max_active_rooms:
+                raise GameError("maximum active room limit reached")
         spec = get_game_spec(game_type)
         if not (spec.min_players <= num_players <= spec.max_players):
             raise GameError(
@@ -231,6 +243,26 @@ class RoomManager:
         room = Room(code=code, game_type=game_type, num_players=num_players, options=options)
         self.rooms[code] = room
         return room
+
+    def cleanup_expired(self, max_age_seconds: float) -> list[str]:
+        """Remove abandoned non-default rooms and cancel their background work."""
+        now = time.monotonic()
+        expired = []
+        for code, room in list(self.rooms.items()):
+            if (code == "HOME" or room.sockets or room.spectator_sockets
+                    or room.conversion_timers):
+                continue
+            if now - room.last_activity_at < max_age_seconds:
+                continue
+            for task in list(room._bot_tasks):
+                if not task.done():
+                    task.cancel()
+            for task in list(room.conversion_timers.values()):
+                if not task.done():
+                    task.cancel()
+            self.rooms.pop(code, None)
+            expired.append(code)
+        return expired
 
     def get(self, code: str) -> Room:
         normalized = code.upper()
@@ -256,6 +288,7 @@ class ConnectionManager:
 
     async def connect(self, room: Room, player_id: str, ws: WebSocket) -> None:
         await ws.accept()
+        room.touch()
         room.sockets[player_id] = ws
         for p in room.players:
             if p.id == player_id:
@@ -263,6 +296,7 @@ class ConnectionManager:
 
     async def connect_spectator(self, room: Room, spectator_id: str, ws: WebSocket) -> None:
         await ws.accept()
+        room.touch()
         previous = room.spectator_sockets.get(spectator_id)
         if previous is not None and previous is not ws:
             try:
@@ -273,6 +307,7 @@ class ConnectionManager:
 
     def disconnect(self, room: Room, player_id: str) -> None:
         room.sockets.pop(player_id, None)
+        room.touch()
         for p in room.players:
             if p.id == player_id:
                 p.connected = False
@@ -282,6 +317,7 @@ class ConnectionManager:
         # remove the replacement when it eventually observes its close.
         if ws is None or room.spectator_sockets.get(spectator_id) is ws:
             room.spectator_sockets.pop(spectator_id, None)
+            room.touch()
 
     async def send_to(self, room: Room, player_id: str, message: dict) -> None:
         ws = room.sockets.get(player_id)
