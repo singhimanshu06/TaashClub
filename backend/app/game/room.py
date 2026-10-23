@@ -200,6 +200,25 @@ class RoomManager:
         self.rooms: dict[str, Room] = {}
         self._rng = random.Random()
 
+    def get_default(self) -> Room:
+        """Return the stable Twenty-Eight shared room."""
+        code = "HOME"
+        room = self.rooms.get(code)
+        if room is not None:
+            return room
+
+        game_type = "twentyeight"
+        spec = get_game_spec(game_type)
+        num_players = 4
+        options = {
+            key: schema["default"]
+            for key, schema in spec.options_schema.items()
+            if "default" in schema
+        }
+        room = Room(code=code, game_type=game_type, num_players=num_players, options=options)
+        self.rooms[code] = room
+        return room
+
     def create_room(self, game_type: str, num_players: int, options: dict) -> Room:
         spec = get_game_spec(game_type)
         if not (spec.min_players <= num_players <= spec.max_players):
@@ -207,14 +226,17 @@ class RoomManager:
                 f"{spec.display_name} supports {spec.min_players}-{spec.max_players} players"
             )
         code = _gen_code(self._rng)
-        while code in self.rooms:
+        while code == "HOME" or code in self.rooms:
             code = _gen_code(self._rng)
         room = Room(code=code, game_type=game_type, num_players=num_players, options=options)
         self.rooms[code] = room
         return room
 
     def get(self, code: str) -> Room:
-        room = self.rooms.get(code.upper())
+        normalized = code.upper()
+        room = self.rooms.get(normalized)
+        if room is None and normalized == "HOME":
+            room = self.get_default()
         if room is None:
             raise GameError("room not found")
         return room

@@ -6,6 +6,10 @@ or across networks. Every game is server-authoritative: the Python engine owns
 all rules and state, clients render a redacted per-player view and send intents
 over a WebSocket.
 
+Deployments also provide a stable shared room. Players can use the normal
+**Join Room** flow with the fixed code `HOME`; no one needs to create or share a
+new room. It is a four-player Twenty-Eight room.
+
 Once all player seats are occupied, a room can also be watched by up to ten
 read-only spectators. Spectators see public table cards and game state, but
 never private hands or legal actions; they may use chat with a chosen display
