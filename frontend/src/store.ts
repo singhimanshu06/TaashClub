@@ -176,9 +176,9 @@ function openSocket(
     if (get().leaving) return;
     if (intendedClose) return; // we closed it on purpose (reset/leave)
 
-    // Invalid room/session and the spectator capacity limit are terminal for
-    // this browser session. The user can start a fresh watch attempt.
-    if (ev.code === 4004 || ev.code === 4003 || ev.code === 4005 || ev.code === 4008 || ev.code === 4009) {
+    // Invalid sessions, capacity limits, and a completed HOME reset are terminal.
+    // Do not reconnect an old session into a new match using the same room code.
+    if ([4003, 4004, 4005, 4008, 4009, 4010].includes(ev.code)) {
       clearSession();
       set({
         screen: "home",
@@ -192,18 +192,22 @@ function openSocket(
         spectatorName: null,
         lobby: null,
         game: null,
+        messages: [],
+        playerBanner: null,
         reconnecting: false,
         reconnectAttempt: 0,
         error:
-          ev.code === 4004
-            ? "Your game has ended."
-            : ev.code === 4008
-              ? "This room already has 10 spectators."
-              : ev.code === 4009
-                ? "This session was opened elsewhere."
-                : session.role === "spectator"
-                  ? "Your spectator session has expired."
-                  : "You are no longer in this room.",
+          ev.code === 4010
+            ? "HOME is ready for a new game. Join HOME again to play."
+            : ev.code === 4004
+              ? "Your game has ended."
+              : ev.code === 4008
+                ? "This room already has 10 spectators."
+                : ev.code === 4009
+                  ? "This session was opened elsewhere."
+                  : session.role === "spectator"
+                    ? "Your spectator session has expired."
+                    : "You are no longer in this room.",
       });
       socket = null;
       return;

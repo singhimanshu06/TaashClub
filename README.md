@@ -10,6 +10,13 @@ Deployments also provide a stable shared room. Players can use the normal
 **Join Room** flow with the fixed code `HOME`; no one needs to create or share a
 new room. It is a four-player Twenty-Eight room.
 
+After a `HOME` game finishes (including when the last human's disconnect grace
+expires), its scoreboard stays available for 10 seconds. Then the server opens
+a fresh `HOME` lobby, cancels the old game's background work, and returns its
+players and spectators to the home screen. Join `HOME` again for the next game.
+The deadline is not extended by spectators, chat, or reconnects. Configure it
+with `HOME_POST_GAME_GRACE_SECONDS`; private rooms are unaffected.
+
 Once all player seats are occupied, a room can also be watched by up to ten
 read-only spectators. Spectators see public table cards and game state, but
 never private hands or legal actions; they may use chat with a chosen display
@@ -118,6 +125,7 @@ cd backend
 .venv/bin/python -m pytest -q                 # engine + bot unit tests
 .venv/bin/python -m pytest tests/test_spectator.py -q # spectator/session checks
 .venv/bin/python -m pytest tests/test_room_lifecycle.py -q # leave/reconnect checks
+.venv/bin/python -m pytest tests/test_home_lifecycle.py -q # shared-room reset checks
 .venv/bin/python tests/smoke_full_game.py     # all-human game over the socket (server must be running)
 .venv/bin/python tests/smoke_bots.py          # human + bots full game (server must be running)
 .venv/bin/python tests/smoke_president.py     # President over the socket

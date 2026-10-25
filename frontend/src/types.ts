@@ -105,6 +105,8 @@ export interface GameState {
   // during gameplay so clients can identify the host even after a mid-game
   // reload (no lobby_update is sent once the game has started).
   host_id?: string | null;
+  // HOME's post-game reset deadline (Unix seconds); absent/null for other rooms.
+  room_reset_at?: number | null;
   // President-specific (optional; absent for Callbreak):
   pile_top?: { rank: number; size: number; player_id: string } | null;
   roles?: Record<string, string>;

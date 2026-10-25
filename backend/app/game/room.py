@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import WebSocket
 
-from .base import BaseGame, GameError, Player
+from .base import BaseGame, GameError, Phase, Player
 from .names import random_bot_name
 from .registry import GameSpec, get_game_spec
 
@@ -46,7 +46,7 @@ class Room:
     chat_log: list[dict] = field(default_factory=list)
     clearing: bool = False   # guards the async post-trick clear (one task at a time)
     # Bot driver bookkeeping. bot_busy prevents scheduling two bot actions for
-    # the same turn; _bot_tasks holds strong refs to in-flight bot/auto-advance
+    # the same turn; _bot_tasks holds strong refs to bot/trick/auto-advance
     # tasks so the event loop doesn't garbage-collect them mid-flight (a known
     # asyncio footgun when the only reference is dropped too early).
     bot_busy: bool = False
@@ -57,9 +57,20 @@ class Room:
     conversion_timers: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     last_activity_at: float = field(default_factory=time.monotonic)
+    # HOME keeps a fixed post-game deadline, independent of chat/reconnects.
+    finished_at: Optional[float] = None
+    reset_at: Optional[float] = None  # Unix timestamp exposed to clients
+    retired: bool = False
 
     def touch(self) -> None:
         self.last_activity_at = time.monotonic()
+
+    def schedule_home_reset(self, grace_seconds: float) -> None:
+        if (self.retired or self.code != "HOME" or self.game is None
+                or self.game.phase != Phase.GAME_END or self.finished_at is not None):
+            return
+        self.finished_at = time.monotonic()
+        self.reset_at = time.time() + grace_seconds
 
     @property
     def spec(self) -> GameSpec:
@@ -156,7 +167,7 @@ class Room:
         return bot
 
     def has_player(self, player_id: str) -> bool:
-        return any(p.id == player_id for p in self.players)
+        return not self.retired and any(p.id == player_id for p in self.players)
 
     def add_spectator(self, name: str) -> "Spectator":
         if not (self.started or self.is_full()):
@@ -180,7 +191,7 @@ class Room:
         return spectator
 
     def get_spectator(self, spectator_id: str) -> Optional["Spectator"]:
-        return self.spectators.get(spectator_id)
+        return None if self.retired else self.spectators.get(spectator_id)
 
     def start_game(self, player_id: str) -> None:
         if player_id != self.host_id:
@@ -279,6 +290,24 @@ class RoomManager:
         self.rooms[code] = room
         return room
 
+    def reset_finished_home(self, grace_seconds: float) -> Optional[Room]:
+        """Atomically replace a finished HOME room; return it for socket closure."""
+        room = self.rooms.get("HOME")
+        if room is None or room.game is None or room.game.phase != Phase.GAME_END:
+            return None
+        room.schedule_home_reset(grace_seconds)
+        if room.finished_at is None or time.monotonic() - room.finished_at < grace_seconds:
+            return None
+        room.retired = True
+        for task in list(room._bot_tasks) + list(room.conversion_timers.values()):
+            if not task.done():
+                task.cancel()
+        room._bot_tasks.clear()
+        room.conversion_timers.clear()
+        self.rooms.pop("HOME")
+        self.get_default()
+        return room
+
     def cleanup_expired(self, max_age_seconds: float) -> list[str]:
         """Remove abandoned non-default rooms and cancel their background work."""
         now = time.monotonic()
@@ -341,16 +370,20 @@ class ConnectionManager:
                 pass
         return room.sockets.get(player_id) is ws
 
-    async def connect_spectator(self, room: Room, spectator_id: str, ws: WebSocket) -> None:
+    async def connect_spectator(self, room: Room, spectator_id: str, ws: WebSocket) -> bool:
         await ws.accept()
+        if room.get_spectator(spectator_id) is None:
+            await ws.close(code=4010 if room.retired else 4005)
+            return False
         room.touch()
         previous = room.spectator_sockets.get(spectator_id)
+        room.spectator_sockets[spectator_id] = ws
         if previous is not None and previous is not ws:
             try:
                 await previous.close(code=4009)
             except Exception:
                 pass
-        room.spectator_sockets[spectator_id] = ws
+        return room.spectator_sockets.get(spectator_id) is ws and not room.retired
 
     def disconnect(self, room: Room, player_id: str, ws: Optional[WebSocket] = None) -> bool:
         if ws is not None and room.sockets.get(player_id) is not ws:
@@ -396,6 +429,8 @@ class ConnectionManager:
 
     async def broadcast_state(self, room: Room) -> None:
         """Send each room client its redacted view of the game/lobby."""
+        if room.retired:
+            return
         for player_id, ws in list(room.sockets.items()):
             if room.game is not None:
                 state = room.game.to_state(player_id)
@@ -406,6 +441,7 @@ class ConnectionManager:
                 # never learn who the host is, and host-only controls (e.g. the
                 # "Next round" button on the round-end scoreboard) never appear.
                 state["host_id"] = room.host_id
+                state["room_reset_at"] = room.reset_at
                 payload = {"type": "state_update", "state": state}
             else:
                 payload = {"type": "lobby_update", "lobby": room.lobby_snapshot()}
@@ -417,6 +453,7 @@ class ConnectionManager:
             if room.game is not None:
                 state = room.game.to_state(None)
                 state["host_id"] = room.host_id
+                state["room_reset_at"] = room.reset_at
                 payload = {"type": "state_update", "state": state}
             else:
                 payload = {"type": "lobby_update", "lobby": room.lobby_snapshot()}
