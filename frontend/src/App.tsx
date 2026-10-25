@@ -6,6 +6,7 @@ import Lobby from "./components/Lobby";
 import GameTable from "./components/GameTable";
 import Reconnecting from "./components/Reconnecting";
 import Chat from "./components/Chat";
+import LeaveControl from "./components/LeaveControl";
 
 export default function App() {
   const { screen, error, clearError, reconnect } = useStore(
@@ -38,6 +39,7 @@ export default function App() {
       {screen === "game" && <GameTable />}
       {screen === "reconnecting" && <Reconnecting />}
       {(screen === "lobby" || screen === "game") && <Chat />}
+      {screen !== "home" && <LeaveControl />}
       {error && (
         <div className="toast" onClick={clearError}>
           {error}

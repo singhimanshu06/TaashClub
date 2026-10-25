@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { WS_BASE } from "./api";
+import { leaveRoom, WS_BASE } from "./api";
 import type { ChatMessage, GameState, Lobby } from "./types";
 
 type Screen = "home" | "lobby" | "game" | "reconnecting";
@@ -12,6 +12,7 @@ interface Session {
   role: "player" | "spectator";
   code: string;
   playerId?: string;
+  leaveToken?: string;
   spectatorId?: string;
   chatId?: string;
   spectatorName?: string;
@@ -22,6 +23,9 @@ interface Store {
   code: string | null;
   role: "player" | "spectator" | null;
   playerId: string | null;
+  leaveToken: string | null;
+  leaving: boolean;
+  leaveConfirmationOpen: boolean;
   spectatorId: string | null;
   chatId: string | null;
   spectatorName: string | null;
@@ -34,7 +38,7 @@ interface Store {
   messages: ChatMessage[];
   playerBanner: { name: string; connected: boolean; ts: number } | null;
 
-  enterRoom: (code: string, playerId: string) => void;
+  enterRoom: (code: string, playerId: string, leaveToken: string) => void;
   enterSpectator: (code: string, spectatorId: string, chatId: string, name: string) => void;
   reconnect: () => void;
   startGame: () => void;
@@ -44,7 +48,9 @@ interface Store {
   sendChat: (text: string) => void;
   clearError: () => void;
   clearPlayerBanner: () => void;
-  reset: () => void;
+  requestLeave: () => void;
+  cancelLeave: () => void;
+  reset: () => Promise<void>;
 }
 
 let socket: WebSocket | null = null;
@@ -84,7 +90,9 @@ function loadSession(): Session | null {
         spectatorName: s.spectatorName,
       };
     }
-    if (s.code && s.playerId) return { role: "player", code: s.code, playerId: s.playerId };
+    if (s.code && s.playerId) return {
+      role: "player", code: s.code, playerId: s.playerId, leaveToken: s.leaveToken,
+    };
     return null;
   } catch {
     return null;
@@ -151,15 +159,21 @@ function openSocket(
     ? `player_id=${encodeURIComponent(session.playerId!)}`
     : `spectator_id=${encodeURIComponent(session.spectatorId!)}`;
   socket = new WebSocket(`${WS_BASE}/ws/${encodeURIComponent(session.code)}?${query}`);
+  const activeSocket = socket;
 
   socket.onopen = () => {
+    if (socket !== activeSocket) return;
     reconnectAttempts = 0;
     set({ connected: true, reconnecting: false, reconnectAttempt: 0 });
     onOpenExtra?.();
   };
 
   socket.onclose = (ev) => {
+    if (socket !== activeSocket) return;
     set({ connected: false });
+    // The REST response is the departure acknowledgement. Do not discard the
+    // session merely because the server closed its socket while processing it.
+    if (get().leaving) return;
     if (intendedClose) return; // we closed it on purpose (reset/leave)
 
     // Invalid room/session and the spectator capacity limit are terminal for
@@ -171,6 +185,8 @@ function openSocket(
         code: null,
         role: null,
         playerId: null,
+        leaveToken: null,
+        leaveConfirmationOpen: false,
         spectatorId: null,
         chatId: null,
         spectatorName: null,
@@ -184,7 +200,7 @@ function openSocket(
             : ev.code === 4008
               ? "This room already has 10 spectators."
               : ev.code === 4009
-                ? "This spectator session was opened elsewhere."
+                ? "This session was opened elsewhere."
                 : session.role === "spectator"
                   ? "Your spectator session has expired."
                   : "You are no longer in this room.",
@@ -197,7 +213,17 @@ function openSocket(
     scheduleReconnect(set, get);
   };
 
-  socket.onmessage = (ev) => handleMessage(set, ev);
+  socket.onmessage = (ev) => {
+    if (socket !== activeSocket) return;
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "session_credentials") {
+      session.leaveToken = msg.leave_token;
+      saveSession(session);
+      set({ leaveToken: msg.leave_token });
+      return;
+    }
+    handleMessage(set, ev);
+  };
 }
 
 function scheduleReconnect(
@@ -214,6 +240,8 @@ function scheduleReconnect(
       code: null,
       role: null,
       playerId: null,
+      leaveToken: null,
+      leaveConfirmationOpen: false,
       spectatorId: null,
       chatId: null,
       spectatorName: null,
@@ -249,6 +277,9 @@ export const useStore = create<Store>((set, get) => ({
   code: null,
   role: null,
   playerId: null,
+  leaveToken: null,
+  leaving: false,
+  leaveConfirmationOpen: false,
   spectatorId: null,
   chatId: null,
   spectatorName: null,
@@ -261,14 +292,16 @@ export const useStore = create<Store>((set, get) => ({
   messages: [],
   playerBanner: null,
 
-  enterRoom: (code, playerId) => {
-    const session: Session = { role: "player", code, playerId };
+  enterRoom: (code, playerId, leaveToken) => {
+    const session: Session = { role: "player", code, playerId, leaveToken };
     saveSession(session);
     disconnectedPlayers.clear();
     set({
       code,
       role: "player",
       playerId,
+      leaveToken,
+      leaveConfirmationOpen: false,
       spectatorId: null,
       chatId: null,
       spectatorName: null,
@@ -294,6 +327,8 @@ export const useStore = create<Store>((set, get) => ({
       code,
       role: "spectator",
       playerId: null,
+      leaveToken: null,
+      leaveConfirmationOpen: false,
       spectatorId,
       chatId,
       spectatorName: name,
@@ -315,6 +350,7 @@ export const useStore = create<Store>((set, get) => ({
       code: session.code,
       role: session.role,
       playerId: session.playerId ?? null,
+      leaveToken: session.leaveToken ?? null,
       spectatorId: session.spectatorId ?? null,
       chatId: session.chatId ?? null,
       spectatorName: session.spectatorName ?? null,
@@ -336,7 +372,30 @@ export const useStore = create<Store>((set, get) => ({
   },
   clearError: () => set({ error: null }),
   clearPlayerBanner: () => set({ playerBanner: null }),
-  reset: () => {
+  requestLeave: () => {
+    if (!get().leaving) set({ leaveConfirmationOpen: true, error: null });
+  },
+  cancelLeave: () => {
+    if (!get().leaving) set({ leaveConfirmationOpen: false });
+  },
+  reset: async () => {
+    if (get().leaving) return;
+    const { role, code, playerId, leaveToken } = get();
+    if (role === "player" && code && playerId) {
+      if (!leaveToken) {
+        set({ error: "Please reconnect before leaving this room." });
+        return;
+      }
+      set({ leaving: true, error: null });
+      try {
+        await leaveRoom(code, playerId, leaveToken);
+      } catch {
+        set({ leaving: false, error: "Could not leave the room. Please try again." });
+        // A timed-out response might still have closed our socket server-side.
+        if (!socket || socket.readyState === WebSocket.CLOSED) scheduleReconnect(set, get);
+        return;
+      }
+    }
     intendedClose = true;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -351,6 +410,9 @@ export const useStore = create<Store>((set, get) => ({
       code: null,
       role: null,
       playerId: null,
+      leaveToken: null,
+      leaving: false,
+      leaveConfirmationOpen: false,
       spectatorId: null,
       chatId: null,
       spectatorName: null,

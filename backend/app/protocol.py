@@ -22,8 +22,14 @@ class JoinRoomRequest(BaseModel):
 
 class JoinRoomResponse(BaseModel):
     player_id: str
+    leave_token: str
     join_order: int
     code: str
+
+
+class LeaveRoomRequest(BaseModel):
+    player_id: str = Field(..., min_length=1)
+    leave_token: str = Field(..., min_length=1)
 
 
 class SpectateRoomRequest(BaseModel):

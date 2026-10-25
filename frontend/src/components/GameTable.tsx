@@ -97,13 +97,12 @@ function SelfChip({
 }
 
 export default function GameTable() {
-  const { game, role, playerId, sendAction, reset } = useStore(
+  const { game, role, playerId, sendAction } = useStore(
     useShallow((s) => ({
       game: s.game as GameState,
       role: s.role,
       playerId: s.playerId,
       sendAction: s.sendAction,
-      reset: s.reset,
     }))
   );
 
@@ -252,41 +251,37 @@ export default function GameTable() {
   return (
     <div className="screen table-screen">
       <PlayerBanner />
-      {/* Top status bar: Scores (left) | round info (center) | Leave (right) */}
+      <button
+        type="button"
+        className="mute-btn"
+        onClick={() => {
+          const next = !muted;
+          setMuted(next);
+          setMutedState(next);
+        }}
+        title={muted ? "Unmute sound" : "Mute sound"}
+        aria-label={muted ? "Unmute sound" : "Mute sound"}
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
+      {/* Top status bar: Scores (left) | round info (center) */}
       <div className="status-bar">
         <div className="status-left">
           <Scorecard game={game} playerId={playerId} />
         </div>
-        <div className="status-center">
-          {isSpectator && <div className="status-chip spectator-chip">Watching</div>}
+        <div className="status-center" role="region" aria-label="Round and game information" tabIndex={0}>
           {totalRounds != null && (
             <div className="status-chip">
               Round <strong>{game.round_index + 1}</strong> / {totalRounds}
             </div>
           )}
+          {isSpectator && <div className="status-chip spectator-chip">Watching</div>}
           {StatusExtra && <StatusExtra game={game} />}
           {cardsThisRound != null && (
             <div className="status-chip">
               <strong>{cardsThisRound}</strong> cards
             </div>
           )}
-        </div>
-        <div className="status-right">
-          <button
-            className="mute-btn"
-            onClick={() => {
-              const next = !muted;
-              setMuted(next);
-              setMutedState(next);
-            }}
-            title={muted ? "Unmute sound" : "Mute sound"}
-            aria-label={muted ? "Unmute sound" : "Mute sound"}
-          >
-            {muted ? "🔇" : "🔊"}
-          </button>
-          <button className="leave-btn" onClick={reset} title="Leave game">
-            ← Leave
-          </button>
         </div>
       </div>
 

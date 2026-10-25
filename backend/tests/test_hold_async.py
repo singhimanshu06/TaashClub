@@ -12,7 +12,7 @@ def _started_room() -> Room:
     room = Room(code="TEST", game_type="callbreak", num_players=4,
                 options={"variant": Variant.SINGLE_RUN.value})
     for n in ["A", "B", "C", "D"]:
-        room.add_player(n)
+        room.add_player(n).connected = True  # simulate connected humans
     room.start_game(room.host_id)
     return room
 

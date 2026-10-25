@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import random
+import secrets
 import time
 from collections import deque
 from typing import Callable
@@ -22,6 +23,7 @@ from .protocol import (
     GameInfo,
     JoinRoomRequest,
     JoinRoomResponse,
+    LeaveRoomRequest,
     SpectateRoomRequest,
     SpectateRoomResponse,
 )
@@ -48,6 +50,7 @@ WS_MESSAGES_PER_SECOND = int(os.environ.get("WS_MESSAGES_PER_SECOND", "20"))
 MAX_WS_MESSAGE_BYTES = int(os.environ.get("MAX_WS_MESSAGE_BYTES", "65536"))
 MAX_ACTIVE_ROOMS = int(os.environ.get("MAX_ACTIVE_ROOMS", "10"))
 EMPTY_ROOM_TTL_SECONDS = float(os.environ.get("EMPTY_ROOM_TTL_SECONDS", "180"))
+LOBBY_RECONNECT_GRACE_SECONDS = float(os.environ.get("LOBBY_RECONNECT_GRACE_SECONDS", "30"))
 
 app = FastAPI(title="TaashClub")
 
@@ -172,7 +175,10 @@ def _check_rest_limit(request: Request, endpoint: str) -> None:
 
 async def _cleanup_rooms_loop() -> None:
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(1)
+        for room in list(rooms.rooms.values()):
+            if room.expire_lobby_seats(LOBBY_RECONNECT_GRACE_SECONDS):
+                await _after_state_change(room)
         rooms.cleanup_expired(EMPTY_ROOM_TTL_SECONDS)
         for limiter in rest_limiters.values():
             limiter.prune()
@@ -236,14 +242,49 @@ def create_room(req: CreateRoomRequest, request: Request):
 
 
 @app.post("/rooms/{code}/join", response_model=JoinRoomResponse)
-def join_room(code: str, req: JoinRoomRequest, request: Request):
+async def join_room(code: str, req: JoinRoomRequest, request: Request):
     _check_rest_limit(request, "join")
     try:
         room = rooms.get(code)
+        room.expire_lobby_seats(LOBBY_RECONNECT_GRACE_SECONDS)
         player = room.add_player(req.name)
     except GameError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return JoinRoomResponse(player_id=player.id, join_order=player.join_order, code=room.code)
+    response = JoinRoomResponse(player_id=player.id, leave_token=room.leave_tokens[player.id],
+                                join_order=player.join_order, code=room.code)
+    await _after_state_change(room)
+    return response
+
+
+@app.post("/rooms/{code}/leave")
+async def leave_room(code: str, req: LeaveRoomRequest):
+    # Missing rooms/players are already departed, so retries remain harmless.
+    try:
+        room = rooms.get(code)
+    except GameError:
+        return {"left": True}
+    if not room.has_player(req.player_id):
+        return {"left": True}
+    token = room.leave_tokens.get(req.player_id)
+    if token is None or not secrets.compare_digest(token, req.leave_token):
+        raise HTTPException(status_code=403, detail="invalid player session")
+
+    ws = room.sockets.get(req.player_id)
+    connections.disconnect(room, req.player_id)
+    if not room.started:
+        room.remove_lobby_player(req.player_id)
+    else:
+        # Never remove seats from a running engine. Preserve its reconnect/bot
+        # takeover policy, even if a game started while Leave was in flight.
+        _schedule_conversion_if_needed(room, req.player_id)
+        await _broadcast_player_status(room, req.player_id, False)
+    if ws is not None:
+        try:
+            await ws.close(code=4003)
+        except Exception:
+            pass
+    await _after_state_change(room)
+    return {"left": True}
 
 
 @app.post("/rooms/{code}/spectate", response_model=SpectateRoomResponse)
@@ -325,7 +366,8 @@ async def game_socket(
         await ws.close(code=4003)
         return
 
-    await connections.connect(room, player_id, ws)
+    if not await connections.connect(room, player_id, ws):
+        return
     message_limiter = SlidingWindowLimiter(WS_MESSAGES_PER_SECOND, 1)
     client_ip = _client_ip(ws.headers, ws.client)
 
@@ -336,21 +378,28 @@ async def game_socket(
         if p.id == player_id:
             p.is_bot = False
 
-    await _broadcast_player_status(room, player_id, True)
-
-    await connections.send_to(room, player_id, {"type": "chat_history", "messages": room.chat_log})
-    await _after_state_change(room)
-
     try:
+        # Private delivery also upgrades sessions saved before explicit leave
+        # credentials were introduced. Never include this token in lobby state.
+        await connections.send_to(room, player_id, {
+            "type": "session_credentials", "leave_token": room.leave_tokens[player_id],
+        })
+        await _broadcast_player_status(room, player_id, True)
+        await connections.send_to(room, player_id, {"type": "chat_history", "messages": room.chat_log})
+        await _after_state_change(room)
         while True:
             msg = await _receive_limited_json(ws, message_limiter, client_ip)
+            if room.sockets.get(player_id) is not ws:
+                break
             room.touch()
             await handle_event(room, player_id, msg)
     except (WebSocketDisconnect, WebSocketLimitExceeded, ValueError, json.JSONDecodeError):
-        connections.disconnect(room, player_id)
-        await _broadcast_player_status(room, player_id, False)
-        _schedule_conversion_if_needed(room, player_id)
-        await _after_state_change(room)
+        pass
+    finally:
+        if connections.disconnect(room, player_id, ws):
+            await _broadcast_player_status(room, player_id, False)
+            _schedule_conversion_if_needed(room, player_id)
+            await _after_state_change(room)
 
 
 async def handle_event(room: Room, player_id: str, msg: dict) -> None:
