@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import random
 import secrets
@@ -51,6 +52,8 @@ MAX_WS_MESSAGE_BYTES = int(os.environ.get("MAX_WS_MESSAGE_BYTES", "65536"))
 MAX_ACTIVE_ROOMS = int(os.environ.get("MAX_ACTIVE_ROOMS", "10"))
 EMPTY_ROOM_TTL_SECONDS = float(os.environ.get("EMPTY_ROOM_TTL_SECONDS", "180"))
 LOBBY_RECONNECT_GRACE_SECONDS = float(os.environ.get("LOBBY_RECONNECT_GRACE_SECONDS", "30"))
+# Fixed scoreboard window before the shared HOME code opens a fresh lobby.
+HOME_POST_GAME_GRACE_SECONDS = float(os.environ.get("HOME_POST_GAME_GRACE_SECONDS", "10"))
 
 app = FastAPI(title="TaashClub")
 
@@ -176,12 +179,25 @@ def _check_rest_limit(request: Request, endpoint: str) -> None:
 async def _cleanup_rooms_loop() -> None:
     while True:
         await asyncio.sleep(1)
+        await _reset_home_if_due()
         for room in list(rooms.rooms.values()):
             if room.expire_lobby_seats(LOBBY_RECONNECT_GRACE_SECONDS):
                 await _after_state_change(room)
         rooms.cleanup_expired(EMPTY_ROOM_TTL_SECONDS)
         for limiter in rest_limiters.values():
             limiter.prune()
+
+
+async def _reset_home_if_due() -> None:
+    old_room = rooms.reset_finished_home(HOME_POST_GAME_GRACE_SECONDS)
+    if old_room is None:
+        return
+    # Detach before yielding: old receive loops cannot mutate or disconnect the
+    # replacement room, and new joins need not wait for old socket shutdowns.
+    sockets = list(old_room.sockets.values()) + list(old_room.spectator_sockets.values())
+    old_room.sockets.clear()
+    old_room.spectator_sockets.clear()
+    await asyncio.gather(*(ws.close(code=4010) for ws in sockets), return_exceptions=True)
 
 
 @app.on_event("startup")
@@ -244,8 +260,18 @@ def create_room(req: CreateRoomRequest, request: Request):
 @app.post("/rooms/{code}/join", response_model=JoinRoomResponse)
 async def join_room(code: str, req: JoinRoomRequest, request: Request):
     _check_rest_limit(request, "join")
+    if code.upper() == "HOME":
+        await _reset_home_if_due()
     try:
         room = rooms.get(code)
+        if room.reset_at is not None:
+            remaining = max(1, math.ceil(room.reset_at - time.time()))
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "ROOM_RESET_PENDING",
+                        "message": f"HOME game has finished. A new game opens in {remaining} seconds."},
+                headers={"Retry-After": str(remaining)},
+            )
         room.expire_lobby_seats(LOBBY_RECONNECT_GRACE_SECONDS)
         player = room.add_player(req.name)
     except GameError as e:
@@ -288,8 +314,10 @@ async def leave_room(code: str, req: LeaveRoomRequest):
 
 
 @app.post("/rooms/{code}/spectate", response_model=SpectateRoomResponse)
-def spectate_room(code: str, req: SpectateRoomRequest, request: Request):
+async def spectate_room(code: str, req: SpectateRoomRequest, request: Request):
     _check_rest_limit(request, "spectate")
+    if code.upper() == "HOME":
+        await _reset_home_if_due()
     try:
         room = rooms.get(code)
         spectator = room.add_spectator(req.name)
@@ -318,6 +346,8 @@ async def game_socket(
     player_id: str | None = None,
     spectator_id: str | None = None,
 ):
+    if code.upper() == "HOME":
+        await _reset_home_if_due()
     try:
         room = rooms.get(code)
     except GameError:
@@ -343,21 +373,26 @@ async def game_socket(
             await ws.close(code=4008)
             return
 
-        await connections.connect_spectator(room, spectator.spectator_id, ws)
+        if not await connections.connect_spectator(room, spectator.spectator_id, ws):
+            return
         message_limiter = SlidingWindowLimiter(WS_MESSAGES_PER_SECOND, 1)
         client_ip = _client_ip(ws.headers, ws.client)
-        await connections.send_to_spectator(
-            room,
-            spectator.spectator_id,
-            {"type": "chat_history", "messages": room.chat_log},
-        )
-        await _after_state_change(room)
         try:
-            while True:
+            await connections.send_to_spectator(
+                room,
+                spectator.spectator_id,
+                {"type": "chat_history", "messages": room.chat_log},
+            )
+            await _after_state_change(room)
+            while not room.retired:
                 msg = await _receive_limited_json(ws, message_limiter, client_ip)
+                if room.retired or room.spectator_sockets.get(spectator.spectator_id) is not ws:
+                    break
                 room.touch()
                 await handle_spectator_event(room, spectator.spectator_id, msg)
         except (WebSocketDisconnect, WebSocketLimitExceeded, ValueError, json.JSONDecodeError):
+            pass
+        finally:
             connections.disconnect_spectator(room, spectator.spectator_id, ws)
         return
 
@@ -387,9 +422,9 @@ async def game_socket(
         await _broadcast_player_status(room, player_id, True)
         await connections.send_to(room, player_id, {"type": "chat_history", "messages": room.chat_log})
         await _after_state_change(room)
-        while True:
+        while not room.retired:
             msg = await _receive_limited_json(ws, message_limiter, client_ip)
-            if room.sockets.get(player_id) is not ws:
+            if room.retired or room.sockets.get(player_id) is not ws:
                 break
             room.touch()
             await handle_event(room, player_id, msg)
@@ -403,6 +438,8 @@ async def game_socket(
 
 
 async def handle_event(room: Room, player_id: str, msg: dict) -> None:
+    if room.retired:
+        return
     event = msg.get("type")
 
     # Chat is broadcast on its own channel and never touches game state.
@@ -467,16 +504,26 @@ async def _after_state_change(room: Room) -> None:
     Every state mutation path (client events, bot actions, trick commit) funnels
     through here so the bots see a consistent post-state hook.
     """
+    if room.retired:
+        return
+    room.schedule_home_reset(HOME_POST_GAME_GRACE_SECONDS)
     await connections.broadcast_state(room)
 
     game = room.game
-    if game is None:
+    if room.retired or game is None:
+        return
+    if game.phase == Phase.GAME_END:
+        _cancel_auto_advance(room)
+        for player_id in list(room.conversion_timers):
+            _cancel_conversion(room, player_id)
         return
 
     # A completed trick is held on the table, then cleared after a short delay.
     if game.awaiting_trick_clear and not room.clearing:
         room.clearing = True
-        asyncio.create_task(_hold_and_clear_trick(room))
+        t = asyncio.create_task(_hold_and_clear_trick(room))
+        room._bot_tasks.add(t)
+        t.add_done_callback(room._bot_tasks.discard)
         return
 
     # If it's a bot's turn to act, schedule its "think then act" task (one at a
@@ -576,6 +623,8 @@ def _cancel_auto_advance(room: Room) -> None:
     # Cancel any in-flight auto-advance coroutine still pending. We identify
     # them by their coroutine's qualified name (robust across calls).
     for t in list(room._bot_tasks):
+        if t is asyncio.current_task():
+            continue
         if not t.done() and "auto_advance" in getattr(t.get_coro(), "__qualname__", ""):
             t.cancel()
 

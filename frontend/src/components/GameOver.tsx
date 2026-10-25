@@ -1,10 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStore } from "../store";
 import type { GameState } from "../types";
 import { getGameSlots } from "../games/registry";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
+
+function HomeResetNotice({ resetAt }: { resetAt: number }) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const remaining = Math.max(0, Math.ceil(resetAt - now));
+  return (
+    <p className="modal-sub">
+      {remaining > 0
+        ? `HOME reopens in ${remaining}s. You’ll return to the home screen, then you can join HOME for a new game.`
+        : "HOME is reopening for a new game…"}
+    </p>
+  );
+}
 
 export default function GameOver({ game }: { game: GameState }) {
   const { playerId, requestLeave } = useStore(
@@ -46,6 +62,7 @@ export default function GameOver({ game }: { game: GameState }) {
     <div className="modal-backdrop">
       <div className="modal gameover">
         <h2>🏆 Game Over</h2>
+        {game.room_reset_at != null && <HomeResetNotice resetAt={game.room_reset_at} />}
         {teamRows ? (
           <>
             <p className="winner-line">
