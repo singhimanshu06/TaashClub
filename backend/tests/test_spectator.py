@@ -38,6 +38,8 @@ def full_room() -> Room:
 
 def started_room() -> Room:
     room = full_room()
+    for player in room.players:
+        player.connected = True
     room.start_game(room.host_id)
     return room
 

@@ -118,7 +118,7 @@ export default function Home() {
         roomCode = (await createRoom(gameType, numPlayers, options)).code;
       }
       const joined = await joinRoom(roomCode, name.trim());
-      enterRoom(joined.code, joined.player_id);
+      enterRoom(joined.code, joined.player_id, joined.leave_token);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Something went wrong.");
       setErrCode(e instanceof ApiError ? e.code : undefined);

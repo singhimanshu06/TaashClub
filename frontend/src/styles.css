@@ -475,6 +475,7 @@ body {
   align-items: center;
   justify-content: center;
   overflow-y: auto;
+  padding-top: max(72px, calc(env(safe-area-inset-top) + 64px));
 }
 .lobby-card {
   width: 100%;
@@ -703,25 +704,38 @@ body {
 }
 .status-bar {
   display: grid;
-  grid-template-columns: 1fr minmax(0, auto) 1fr;
-  align-items: start;
+  /* Equal side columns keep the information centered while reserving room
+     for Scores and the fixed exit control, even on narrow phones. */
+  grid-template-columns: minmax(64px, 1fr) minmax(0, auto) minmax(64px, 1fr);
+  align-items: center;
   gap: 10px;
+  min-height: 44px;
+  flex: 0 0 auto;
 }
-.status-left,
-.status-right {
+.status-left {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.status-right {
-  justify-content: flex-end;
 }
 .status-center {
   display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
+  justify-content: safe center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.status-center::-webkit-scrollbar {
+  display: none;
+}
+.status-center > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .status-chip {
   background: linear-gradient(145deg, rgba(34, 36, 29, 0.92), rgba(13, 17, 14, 0.92));
@@ -1580,26 +1594,75 @@ body {
   padding: 12px 28px;
 }
 
-/* ---------- Leave button ---------- */
+/* ---------- Shared exit control & confirmation ---------- */
 .leave-btn {
-  background: rgba(68, 26, 24, 0.42);
-  border: 1px solid rgba(197, 101, 94, 0.38);
-  color: #e6aaa5;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: linear-gradient(145deg, rgba(34, 36, 29, 0.96), rgba(13, 17, 14, 0.96));
+  border: 1px solid var(--panel-border);
+  color: var(--gold-bright);
+  border-radius: 12px;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
   transition: background 0.12s ease, border-color 0.12s ease;
-  white-space: nowrap;
 }
-.leave-btn:hover {
+.leave-btn:hover:not(:disabled) {
   background: rgba(103, 37, 33, 0.56);
   border-color: rgba(214, 125, 118, 0.62);
+  color: #e6aaa5;
+}
+.leave-btn:focus-visible,
+.leave-dialog button:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}
+.leave-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.leave-dialog {
+  color: var(--text);
+  width: min(420px, calc(100% - 40px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.leave-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+}
+.leave-dialog .modal-sub {
+  margin-top: 12px;
+  line-height: 1.6;
+}
+.leave-dialog-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+.leave-dialog-actions button {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 12px;
 }
 
 /* ---------- Mute toggle ---------- */
 .mute-btn {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   background: linear-gradient(145deg, rgba(34, 36, 29, 0.92), rgba(13, 17, 14, 0.92));
   border: 1px solid var(--panel-border);
   border-radius: 8px;
@@ -1793,23 +1856,26 @@ body {
   }
 }
 
-/* Stack round-info chips into their own full-width, perfectly centered row
-   once the bar gets tight — the side columns (Scores vs mute/Leave) have
-   different natural widths, so a chips-wrapped middle column drifts off
-   center. Spanning all columns removes that drift entirely. */
+/* Keep game information on the same row as Scores and the exit control.
+   Extra chips can scroll horizontally rather than wrap over the top seats. */
 @media (max-width: 768px) {
   .status-center {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    width: 100%;
-    justify-content: center;
+    gap: 5px;
+  }
+  .status-center .trump-chip {
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 0.78rem;
+  }
+  .status-center .trump-symbol {
+    font-size: 1.2rem;
   }
 }
 
 @media (max-width: 640px) {
   .table-screen {
     padding:
-      max(8px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-top))
       max(10px, env(safe-area-inset-right))
       max(12px, env(safe-area-inset-bottom))
       max(10px, env(safe-area-inset-left));
@@ -1836,10 +1902,6 @@ body {
   .status-chip {
     padding: 5px 10px;
     font-size: 0.78rem;
-  }
-  .leave-btn {
-    padding: 5px 9px;
-    font-size: 0.74rem;
   }
   .mute-btn {
     padding: 5px 8px;
@@ -1868,7 +1930,7 @@ body {
   }
   .table-screen {
     padding:
-      max(6px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-top))
       max(10px, env(safe-area-inset-right))
       max(10px, env(safe-area-inset-bottom))
       max(10px, env(safe-area-inset-left));

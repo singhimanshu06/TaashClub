@@ -20,11 +20,12 @@ export class ApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(API_BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
@@ -60,9 +61,17 @@ export function createRoom(gameType: string, numPlayers: number, options: Record
 }
 
 export function joinRoom(code: string, name: string) {
-  return post<{ player_id: string; join_order: number; code: string }>(
+  return post<{ player_id: string; leave_token: string; join_order: number; code: string }>(
     `/rooms/${code.toUpperCase()}/join`,
     { name }
+  );
+}
+
+export function leaveRoom(code: string, playerId: string, leaveToken: string) {
+  return post<{ left: boolean }>(
+    `/rooms/${encodeURIComponent(code.toUpperCase())}/leave`,
+    { player_id: playerId, leave_token: leaveToken },
+    AbortSignal.timeout(10000),
   );
 }
 

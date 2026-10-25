@@ -15,6 +15,14 @@ read-only spectators. Spectators see public table cards and game state, but
 never private hands or legal actions; they may use chat with a chosen display
 name.
 
+Before a game starts, **Leave** immediately releases the player's seat and
+transfers host ownership to the next human if needed. Refreshes and unexpected
+disconnects reserve the seat for 30 seconds so the saved session can reconnect;
+unconnected joins expire too. Set `LOBBY_RECONNECT_GRACE_SECONDS` on the backend
+to change this grace period. All human players must be connected to start.
+After a game starts, seats stay fixed and the existing reconnect/bot-takeover
+grace period applies instead.
+
 It started as a single Callbreak variant and has grown into a platform that
 hosts several games behind one shared lobby/room/socket layer. AI bots can fill
 empty seats so you can play solo too.
@@ -109,6 +117,7 @@ docker run -p 8080:8080 taashclub     # app at http://localhost:8080
 cd backend
 .venv/bin/python -m pytest -q                 # engine + bot unit tests
 .venv/bin/python -m pytest tests/test_spectator.py -q # spectator/session checks
+.venv/bin/python -m pytest tests/test_room_lifecycle.py -q # leave/reconnect checks
 .venv/bin/python tests/smoke_full_game.py     # all-human game over the socket (server must be running)
 .venv/bin/python tests/smoke_bots.py          # human + bots full game (server must be running)
 .venv/bin/python tests/smoke_president.py     # President over the socket

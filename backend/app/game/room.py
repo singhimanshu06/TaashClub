@@ -35,6 +35,10 @@ class Room:
     players: list[Player] = field(default_factory=list)   # in join order
     game: Optional[BaseGame] = None
     sockets: dict[str, WebSocket] = field(default_factory=dict)
+    # Private credentials for explicit departures; player IDs are public in state.
+    leave_tokens: dict[str, str] = field(default_factory=dict)
+    # Reservations include REST joins that never establish a WebSocket.
+    lobby_disconnected_at: dict[str, float] = field(default_factory=dict)
     # Spectators have their own credentials and sockets. They never become
     # players, so they do not consume seats or participate in player lifecycle.
     spectators: dict[str, "Spectator"] = field(default_factory=dict)
@@ -97,14 +101,42 @@ class Room:
             raise GameError("game already started")
         if self.is_full():
             raise GameError("room is full")
-        player = Player(id=_gen_code(random.Random()) + str(len(self.players)),
+        player = Player(id=secrets.token_urlsafe(16),
                         name=name.strip()[:20] or f"Player {len(self.players) + 1}",
-                        join_order=len(self.players))
+                        join_order=len(self.players), connected=False)
         self.players.append(player)
+        self.leave_tokens[player.id] = secrets.token_urlsafe(24)
+        self.lobby_disconnected_at[player.id] = time.monotonic()
         self.touch()
         if self.host_id is None:
             self.host_id = player.id
         return player
+
+    def remove_lobby_player(self, player_id: str) -> bool:
+        """Release a seat, preserving join order and transferring host ownership."""
+        if self.started:
+            raise GameError("cannot remove a player after the game starts")
+        if not self.has_player(player_id):
+            return False
+        self.players = [p for p in self.players if p.id != player_id]
+        self.leave_tokens.pop(player_id, None)
+        self.lobby_disconnected_at.pop(player_id, None)
+        for seat, player in enumerate(self.players):
+            player.join_order = seat
+        if self.host_id == player_id:
+            self.host_id = next((p.id for p in self.players if not p.is_bot), None)
+        self.touch()
+        return True
+
+    def expire_lobby_seats(self, grace_seconds: float) -> list[str]:
+        if self.started:
+            return []
+        now = time.monotonic()
+        expired = [pid for pid, since in self.lobby_disconnected_at.items()
+                   if pid not in self.sockets and now - since >= grace_seconds]
+        for player_id in expired:
+            self.remove_lobby_player(player_id)
+        return expired
 
     def add_bot(self) -> Player:
         """Fill the next empty seat with a server-driven bot (no socket)."""
@@ -157,6 +189,8 @@ class Room:
             raise GameError(f"need {self.num_players} players to start")
         if self.started:
             raise GameError("game already started")
+        if any(not p.is_bot and not p.connected for p in self.players):
+            raise GameError("all players must be connected to start")
         # Randomize the playing/bidding order once; it is fixed for the whole
         # game. join_order becomes the (now random) seat index the engine uses.
         shuffled = list(self.players)
@@ -165,6 +199,7 @@ class Room:
             p.join_order = seat
         self.game = self.spec.engine_factory(self.num_players, self.options, self.players, random.Random())
         self.game.start()
+        self.lobby_disconnected_at.clear()
 
     def add_one_bot(self, player_id: str) -> None:
         """Host-only: add a single bot to the next empty seat (lobby only)."""
@@ -286,13 +321,25 @@ class Spectator:
 class ConnectionManager:
     """Tracks live sockets per room and broadcasts redacted state to each viewer."""
 
-    async def connect(self, room: Room, player_id: str, ws: WebSocket) -> None:
+    async def connect(self, room: Room, player_id: str, ws: WebSocket) -> bool:
         await ws.accept()
+        # A leave/expiry may have run while accept yielded.
+        if not room.has_player(player_id):
+            await ws.close(code=4003)
+            return False
         room.touch()
+        previous = room.sockets.get(player_id)
         room.sockets[player_id] = ws
+        room.lobby_disconnected_at.pop(player_id, None)
         for p in room.players:
             if p.id == player_id:
                 p.connected = True
+        if previous is not None and previous is not ws:
+            try:
+                await previous.close(code=4009)
+            except Exception:
+                pass
+        return room.sockets.get(player_id) is ws
 
     async def connect_spectator(self, room: Room, spectator_id: str, ws: WebSocket) -> None:
         await ws.accept()
@@ -305,12 +352,17 @@ class ConnectionManager:
                 pass
         room.spectator_sockets[spectator_id] = ws
 
-    def disconnect(self, room: Room, player_id: str) -> None:
+    def disconnect(self, room: Room, player_id: str, ws: Optional[WebSocket] = None) -> bool:
+        if ws is not None and room.sockets.get(player_id) is not ws:
+            return False
         room.sockets.pop(player_id, None)
         room.touch()
         for p in room.players:
             if p.id == player_id:
                 p.connected = False
+                if not room.started:
+                    room.lobby_disconnected_at.setdefault(player_id, time.monotonic())
+        return True
 
     def disconnect_spectator(self, room: Room, spectator_id: str, ws: Optional[WebSocket] = None) -> None:
         # A reconnect can replace a socket. Do not let the old receive loop
@@ -335,7 +387,7 @@ class ConnectionManager:
             try:
                 await ws.send_json(message)
             except Exception:
-                self.disconnect(room, player_id)
+                self.disconnect(room, player_id, ws)
         for spectator_id, ws in list(room.spectator_sockets.items()):
             try:
                 await ws.send_json(message)
@@ -360,7 +412,7 @@ class ConnectionManager:
             try:
                 await ws.send_json(payload)
             except Exception:
-                self.disconnect(room, player_id)
+                self.disconnect(room, player_id, ws)
         for spectator_id, ws in list(room.spectator_sockets.items()):
             if room.game is not None:
                 state = room.game.to_state(None)

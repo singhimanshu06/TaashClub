@@ -52,16 +52,16 @@ function InviteLink({ code }: { code: string }) {
 }
 
 export default function Lobby() {
-  const { lobby, role, playerId, code, connected, startGame, addBot, reset } = useStore(
+  const { lobby, role, playerId, code, connected, leaving, startGame, addBot } = useStore(
     useShallow((s) => ({
       lobby: s.lobby,
       role: s.role,
       playerId: s.playerId,
       code: s.code,
       connected: s.connected,
+      leaving: s.leaving,
       startGame: s.startGame,
       addBot: s.addBot,
-      reset: s.reset,
     }))
   );
 
@@ -76,13 +76,11 @@ export default function Lobby() {
   const isSpectator = role === "spectator";
   const isHost = !isSpectator && lobby.host_id === playerId;
   const full = lobby.players.length >= lobby.num_players;
+  const ready = full && lobby.players.every((p) => p.is_bot || p.connected);
   const seats = Array.from({ length: lobby.num_players });
 
   return (
     <div className="screen lobby-screen">
-      <button className="leave-btn" onClick={reset} title="Leave room">
-        ← Leave
-      </button>
       <div className="lobby-card">
         <div className="room-code-badge">
           <span>Room code</span>
@@ -112,6 +110,7 @@ export default function Lobby() {
                       {!isSpectator && p.id === playerId && <em> (you)</em>}
                     </span>
                     {p.id === lobby.host_id && <span className="host-tag">HOST</span>}
+                    {!p.is_bot && !p.connected && <span className="seat-waiting">reconnecting…</span>}
                   </>
                 ) : (
                   <span className="seat-waiting">waiting…</span>
@@ -126,12 +125,12 @@ export default function Lobby() {
         ) : isHost ? (
           <>
             {!full && (
-              <button className="btn-secondary" onClick={addBot}>
+              <button className="btn-secondary" disabled={leaving || !connected} onClick={addBot}>
                 + Add Bot
               </button>
             )}
-            <button className="btn-primary" disabled={!full} onClick={startGame}>
-              {full ? "Start Game" : `Waiting for ${lobby.num_players - lobby.players.length} more…`}
+            <button className="btn-primary" disabled={!ready || !connected || leaving} onClick={startGame}>
+              {ready ? "Start Game" : full ? "Waiting for players to reconnect…" : `Waiting for ${lobby.num_players - lobby.players.length} more…`}
             </button>
           </>
         ) : (

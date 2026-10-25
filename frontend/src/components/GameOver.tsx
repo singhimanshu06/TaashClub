@@ -7,8 +7,8 @@ import { getGameSlots } from "../games/registry";
 const MEDAL = ["🥇", "🥈", "🥉"];
 
 export default function GameOver({ game }: { game: GameState }) {
-  const { playerId, reset } = useStore(
-    useShallow((s) => ({ playerId: s.playerId, reset: s.reset }))
+  const { playerId, requestLeave } = useStore(
+    useShallow((s) => ({ playerId: s.playerId, requestLeave: s.requestLeave }))
   );
   const [showDetailed, setShowDetailed] = useState(false);
   const standings = game.final_standings ?? [];
@@ -109,7 +109,7 @@ export default function GameOver({ game }: { game: GameState }) {
             Detailed scores
           </button>
         )}
-        <button className="btn-primary" onClick={reset}>
+        <button className="btn-primary" onClick={requestLeave}>
           Back to Home
         </button>
       </div>
