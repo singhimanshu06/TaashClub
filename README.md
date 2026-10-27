@@ -8,7 +8,7 @@ over a WebSocket.
 
 Deployments also provide a stable shared room. Players can use the normal
 **Join Room** flow with the fixed code `HOME`; no one needs to create or share a
-new room. It is a four-player Twenty-Eight room.
+new room. It is a four-player Twenty-Eight room with 20 rounds per game.
 
 After a `HOME` game finishes (including when the last human's disconnect grace
 expires), its scoreboard stays available for 10 seconds. Then the server opens

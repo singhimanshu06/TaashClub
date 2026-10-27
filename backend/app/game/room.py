@@ -268,6 +268,7 @@ class RoomManager:
             for key, schema in spec.options_schema.items()
             if "default" in schema
         }
+        options["deals"] = "20"
         room = Room(code=code, game_type=game_type, num_players=num_players, options=options)
         self.rooms[code] = room
         return room
